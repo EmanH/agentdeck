@@ -17,5 +17,5 @@ AgentDeck builds on these open-source projects. Thank you to their authors.
 | [hidapi](https://github.com/libusb/hidapi) | Python prototype only (not redistributed) | BSD / GPLv3 / original |
 
 Claude is a trademark of Anthropic. Codex is a trademark of OpenAI. Grok is a trademark of xAI.
-Stream Deck is a trademark of Corsair Memory, Inc. (Elgato). AgentDeck is an independent project and
-is not affiliated with or endorsed by any of them.
+Stream Deck is a trademark of Corsair Memory, Inc. (Elgato). Wispr Flow is a trademark of Wispr AI.
+AgentDeck is an independent project and is not affiliated with or endorsed by any of them.
