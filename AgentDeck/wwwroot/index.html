@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>AgentDeck</title>
+  <link rel="stylesheet" href="vendor/xterm.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <aside id="sidebar">
+    <div class="brand"><img src="app.png" alt=""><span>AgentDeck</span></div>
+    <div class="section-title">Projects</div>
+    <nav id="projects"></nav>
+    <button id="workflows" class="side-btn" type="button">
+      <svg viewBox="0 0 16 16"><circle cx="3" cy="8" r="2"/><circle cx="8" cy="8" r="2"/><circle cx="13.2" cy="8" r="2.3" class="fill"/><line x1="5" y1="8" x2="6" y2="8"/><line x1="10" y1="8" x2="10.9" y2="8"/></svg>
+      Workflows
+    </button>
+    <button id="recent" class="side-btn" type="button">
+      <svg viewBox="0 0 16 16"><rect x="3.5" y="2.5" width="9" height="12" rx="1.5"/><path d="M6 1.8h4v2H6z"/><line x1="5.8" y1="7" x2="10.2" y2="7"/><line x1="5.8" y1="9.5" x2="10.2" y2="9.5"/><line x1="5.8" y1="12" x2="8.5" y2="12"/></svg>
+      Recent dictations
+    </button>
+    <button id="add-project" type="button"><span>+</span> Add project</button>
+  </aside>
+
+  <main id="main">
+    <header id="tabbar">
+      <div id="tabs"></div>
+      <button id="new-tab" class="icon-btn" type="button" title="New shell tab (Ctrl+Shift+T)">+</button>
+      <div id="launchers">
+        <button class="launch" data-agent="claude" type="button" title="New Claude Code terminal (Ctrl+Shift+1)"><img class="logo" src="claude.svg" alt="">Claude</button>
+        <button class="launch" data-agent="codex" type="button" title="New Codex terminal (Ctrl+Shift+2)"><img class="logo" src="codex.svg" alt="">Codex</button>
+        <button class="launch" data-agent="grok" type="button" title="New Grok terminal (Ctrl+Shift+3)"><img class="logo" src="grok.svg" alt="">Grok</button>
+        <button id="workflow-menu" class="launch" type="button" title="Run a workflow in this project">
+          <svg viewBox="0 0 16 16"><circle cx="3" cy="8" r="2"/><circle cx="8" cy="8" r="2"/><circle cx="13.2" cy="8" r="2.3" class="fill"/><line x1="5" y1="8" x2="6" y2="8"/><line x1="10" y1="8" x2="10.9" y2="8"/></svg>
+          Workflows <span class="caret">▾</span>
+        </button>
+        <span class="divider"></span>
+        <button id="split-right" class="icon-btn" type="button" title="Split right (Alt+Shift+=)">
+          <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><line x1="8" y1="2.5" x2="8" y2="13.5"/></svg>
+        </button>
+        <button id="split-down" class="icon-btn" type="button" title="Split down (Alt+Shift+-)">
+          <svg viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><line x1="1.5" y1="8" x2="14.5" y2="8"/></svg>
+        </button>
+      </div>
+    </header>
+    <section id="stage"></section>
+    <section id="empty" hidden></section>
+  </main>
+
+  <div id="menu" hidden></div>
+  <div id="overlay" hidden><form id="dialog" autocomplete="off"></form></div>
+
+  <script src="vendor/xterm.js"></script>
+  <script src="vendor/addon-fit.js"></script>
+  <script src="vendor/addon-webgl.js"></script>
+  <script src="vendor/addon-unicode11.js"></script>
+  <script src="vendor/addon-web-links.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

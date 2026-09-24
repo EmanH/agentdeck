@@ -1,0 +1,15 @@
+# Python prototype
+.venv/
+__pycache__/
+.env
+# hidapi.dll is a third-party binary; see prototypes/python/README.md for where to get it
+prototypes/python/hidapi.dll
+
+# .NET
+**/bin/
+**/obj/
+.vs/
+*.user
+
+# Node (icon build)
+node_modules/
