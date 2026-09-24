@@ -4,7 +4,7 @@
 
 # AgentDeck
 
-**Windows terminal + Stream Deck control surface for Claude Code, Codex and Grok, with system-wide voice dictation.**
+**A thin wrapper around your agents' real terminal UIs, for running many Claude Code, Codex and Grok sessions across many projects. Plus a Stream Deck control surface and system-wide voice dictation.**
 
 ![Windows 11](https://img.shields.io/badge/Windows-11-0078D4?logo=windows11&logoColor=white)
 ![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)
@@ -16,6 +16,17 @@
 </div>
 
 ![AgentDeck with Claude Code and Grok side by side](docs/screenshots/ui-main.png)
+
+## Same agents, same terminal UIs, just organised
+
+AgentDeck is not a new agent UI. Claude Code, Codex and Grok run **unmodified, in real terminals**
+(ConPTY, the same plumbing as Windows Terminal), so every TUI feature, keybinding, slash command and update
+works exactly as it does in your usual terminal. AgentDeck only adds a thin layer around them:
+
+- **Sessions grouped by project:** every project is a folder with its own tabs, split panes and agents; switch projects and they're right where you left them.
+- **Mix agents freely:** Claude, Codex, Grok and plain shells side by side, each opened in the project folder in one press.
+- **See every session at once:** live labels, busy dots and ✦ finished alerts in the tabs and on the Stream Deck, so you know which agent needs you.
+- **Jump anywhere:** one key press brings any session to the front, in any project.
 
 ## 🎙️ System-wide voice dictation: a Wispr Flow alternative
 
@@ -33,7 +44,7 @@ Same flow as Wispr Flow: press a key, talk, press again, clean text appears. **W
 | | |
 |---|---|
 | **Projects** | Each project is a folder with its own icon, color, terminals and workflows. |
-| **Terminals** | ConPTY (same as Windows Terminal) + xterm.js/WebGL: tabs, split panes, 24-bit color, color emoji. |
+| **Terminals** | Real ConPTY terminals (same as Windows Terminal) rendered with xterm.js/WebGL: tabs, split panes, 24-bit color, color emoji. Agent TUIs run unchanged. |
 | **Agents** | One press/click/shortcut opens Claude, Codex or Grok in the project folder. |
 | **Stream Deck** | Projects, live sessions (logo + 2-word label), launchers, workflows, Enter, mic. Tap to jump, hold 0.8 s to close. No Elgato software needed. |
 | **Finished alerts** | When an agent goes quiet after working: soft pop + ✦ on its key, tab and project. |
