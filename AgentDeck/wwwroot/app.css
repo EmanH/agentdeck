@@ -395,7 +395,8 @@ svg .fill { fill: #a855f7; stroke: #a855f7; }
 }
 @keyframes star-in { from { transform: scale(.2) rotate(-90deg); opacity: 0; } }
 
-/* Working: a ring spins round the agent icon and a shimmer runs along the tab's bottom edge. */
+/* Working: a faint ring turns slowly round the agent icon and a soft glow drifts along the tab's
+   bottom edge. Kept slow and dim on purpose: several agents can be busy at once. */
 .tab { position: relative; }
 .tab.dragging { opacity: .45; }
 .tab.drop-before::before, .tab.drop-after::before {
@@ -409,25 +410,24 @@ svg .fill { fill: #a855f7; stroke: #a855f7; }
 .tab-icon { position: relative; flex: none; display: grid; place-items: center; width: 16px; height: 16px; }
 .tab.working .tab-icon::after {
   content: "";
-  position: absolute; inset: -4px;
+  position: absolute; inset: -3px;
   border-radius: 50%;
-  border: 2px solid transparent;
-  border-top-color: var(--accent);
-  border-right-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  animation: spin .9s linear infinite;
+  border: 1.5px solid transparent;
+  border-top-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  animation: spin 2s linear infinite;
 }
 .tab.working::after {
   content: "";
-  position: absolute; left: 8px; right: 8px; bottom: 0; height: 2px;
-  border-radius: 2px;
+  position: absolute; left: 8px; right: 8px; bottom: 0; height: 1px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  background-size: 50% 100%;
+  background-size: 40% 100%;
   background-repeat: no-repeat;
-  animation: shimmer 1.3s ease-in-out infinite;
+  opacity: .6;
+  animation: shimmer 2.6s ease-in-out infinite;
 }
-@keyframes shimmer { from { background-position: -50% 0; } to { background-position: 150% 0; } }
-.project.working .count { animation: pulse 1.2s ease-in-out infinite; }
-@keyframes pulse { 50% { background: color-mix(in srgb, var(--c) 55%, #2a2a2a); color: #fff; } }
+@keyframes shimmer { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.project.working .count { animation: pulse 2.4s ease-in-out infinite; }
+@keyframes pulse { 50% { background: color-mix(in srgb, var(--c) 28%, #2a2a2a); } }
 
 .logo { width: 16px; height: 16px; flex: none; }
 .shell-glyph { font: 700 11px "Cascadia Mono", Consolas, monospace; color: #bbb; width: 16px; text-align: center; flex: none; }
