@@ -38,6 +38,10 @@ touches the OS: pseudo consoles, the Stream Deck, the microphone, the global hot
 | `newSession`, `selectProject`, `saveProject`, `removeProject` | `created`, `output`, `exited`, `activate` |
 | `saveWorkflow`, `runWorkflow`, `deleteWorkflow`, `refreshAgentOptions` | `workflows`, `agentOptions`, `transcripts` |
 | `openUrl`, `openFolder`, `addProject` | `pasteInto`, `projectDialog`, `workflowEditor` |
+| `saveDictionary`, `tabOrder`, `dropFiles` (+ `File` objects) | `dictionary`, `working` |
+
+Dropped files reach the host via `postMessageWithAdditionalObjects`, which exposes each file's real path
+(`CoreWebView2File.Path`); the host quotes the paths and pastes them into that terminal.
 
 C# owns processes and persistent data; the page owns layout (per-project tabs, each a binary tree of split
 panes). `docs/tools/mock-bridge.js` implements the host side in ~150 lines of JS, which is handy for UI work

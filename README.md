@@ -36,6 +36,8 @@ Same flow as Wispr Flow: press a key, talk, press again, clean text appears. **W
 - **Fast:** audio streams to Soniox (`stt-rt-v5`) while you talk; the transcript is ready ~0.3 s after you stop.
 - **Clean:** `gpt-6-luna` removes filler and repetition, fixes grammar, applies *"scratch that"*, and formats long dictation into paragraphs and bullets, in your own voice.
 - **Targeted:** dictation started in an AgentDeck terminal lands in *that* terminal (and is submitted) even if you've switched apps.
+- **Launch and talk:** a deck *+ Claude / + Codex / + Grok* key opens the agent and starts dictating into it immediately; the text waits until the agent is ready.
+- **Custom dictionary:** your names and jargon are sent to Soniox as context and to the cleanup, which fixes near-misses (*sonics* → *Soniox*).
 - **Enter** mid-dictation = stop, paste, submit. **Double-tap** the mic = cancel.
 - **Safety net:** last 10 transcripts in *Recent dictations*; a *Paste again* key for 10 s after each one.
 
@@ -44,10 +46,10 @@ Same flow as Wispr Flow: press a key, talk, press again, clean text appears. **W
 | | |
 |---|---|
 | **Projects** | Each project is a folder with its own icon, color, terminals and workflows. |
-| **Terminals** | Real ConPTY terminals (same as Windows Terminal) rendered with xterm.js/WebGL: tabs, split panes, 24-bit color, color emoji. Agent TUIs run unchanged. |
+| **Terminals** | Real ConPTY terminals (same as Windows Terminal) rendered with xterm.js/WebGL: tabs (drag to reorder), split panes, 24-bit color, color emoji. Drop files on a terminal to paste their paths. Agent TUIs run unchanged. |
 | **Agents** | One press/click/shortcut opens Claude, Codex or Grok in the project folder. |
 | **Stream Deck** | Projects, live sessions (logo + 2-word label), launchers, workflows, Enter, mic. Tap to jump, hold 0.8 s to close. No Elgato software needed. |
-| **Finished alerts** | When an agent goes quiet after working: soft pop + ✦ on its key, tab and project. |
+| **Live status** | Working tabs show a spinning ring and shimmer; when an agent goes quiet after working: soft pop + ✦ on its key, tab and project. |
 | **Workflows** | Saved prompt + agent + model + thinking level, per project. One press opens a tab with the agent already working. |
 | **Model discovery** | Models and thinking levels are read from the CLIs at runtime, so new ones appear without an update. |
 | **Icons** | 1,591 Fluent Emoji, searchable by meaning (*fast* → ⚡, *deploy* → 🚀). |
@@ -75,6 +77,8 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 Installs a self-contained build to `%LOCALAPPDATA%\Programs\AgentDeck`, adds it to startup and launches it. Re-run to update.
+
+No SDK? Download `AgentDeck-*-win-x64.zip` from [Releases](https://github.com/EmanH/agentdeck/releases), unzip anywhere and run `AgentDeck.exe` (it adds itself to startup on first run; toggle from the tray).
 
 | Env var | For |
 |---|---|

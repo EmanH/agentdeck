@@ -28,6 +28,7 @@ sealed class MainWindow : Window, IDeckActions
     readonly ProjectStore _projects = new();
     readonly TranscriptStore _transcripts = new();
     readonly WorkflowStore _workflows = new();
+    readonly DictionaryStore _dictionary = new();
     readonly OpenAiClient _openai = new(Env.Get("OPENAI_API_KEY"));
     readonly SessionManager _sessions;
     readonly DictationService _dictation;
@@ -59,6 +60,7 @@ sealed class MainWindow : Window, IDeckActions
         _sessions.Exited += s => Dispatcher.BeginInvoke(() => Post(new { t = "exited", id = s.Id }));
         _sessions.Changed += QueueState;
         _sessions.Finished += s => Dispatcher.BeginInvoke(() => OnSessionFinished(s));
+        _sessions.WorkingChanged += ids => Dispatcher.BeginInvoke(() => Post(new { t = "working", ids }));
         Activated += (_, _) =>
         {
             // Coming back to the window counts as seeing the terminal on screen.
@@ -66,7 +68,9 @@ sealed class MainWindow : Window, IDeckActions
         };
 
         _transcripts.Changed += () => Dispatcher.BeginInvoke(PushTranscripts);
-        _dictation = new DictationService(Env.Get("SONIOX_API_KEY"), _openai, _transcripts, CaptureDictationTarget, DeliverDictationAsync);
+        _dictionary.Changed += () => Dispatcher.BeginInvoke(PushDictionary);
+        _dictation = new DictationService(Env.Get("SONIOX_API_KEY"), _openai, _transcripts, _dictionary,
+                                          CaptureDictationTarget, DeliverDictationAsync);
         _workflows.Changed += () => Dispatcher.BeginInvoke(PushWorkflows);
         AgentCatalog.Changed += () => Dispatcher.BeginInvoke(PushAgentOptions);
         AgentCatalog.Refresh();
@@ -167,7 +171,14 @@ sealed class MainWindow : Window, IDeckActions
             {
                 if (e.PermissionKind == CoreWebView2PermissionKind.ClipboardRead) e.State = CoreWebView2PermissionState.Allow;
             };
-            core.WebMessageReceived += (_, e) => OnWebMessage(e.WebMessageAsJson);
+            core.WebMessageReceived += (_, e) =>
+            {
+                // Files dropped on a terminal arrive as additional objects, which carry their real paths.
+                if (e.AdditionalObjects is { Count: > 0 } objects)
+                    OnFilesDropped(e.WebMessageAsJson, objects.OfType<CoreWebView2File>().Select(f => f.Path).ToArray());
+                else
+                    OnWebMessage(e.WebMessageAsJson);
+            };
             core.Navigate("https://agentdeck.example/index.html");
         }
         catch (Exception ex)
@@ -231,6 +242,8 @@ sealed class MainWindow : Window, IDeckActions
             }),
         });
 
+    void PushDictionary() => Post(new { t = "dictionary", terms = _dictionary.Snapshot() });
+
     void PushAgentOptions() => Post(new { t = "agentOptions", agents = AgentCatalog.Current });
 
     void PushTranscripts() =>
@@ -259,6 +272,22 @@ sealed class MainWindow : Window, IDeckActions
         foreach (var (id, data) in batch) Post(new { t = "output", id, data });
     }
 
+    /// <summary>Paste dropped files' paths into the terminal they were dropped on, like Windows Terminal does.</summary>
+    void OnFilesDropped(string json, string[] paths)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.GetProperty("t").GetString() != "dropFiles" || paths.Length == 0) return;
+            int id = doc.RootElement.GetProperty("id").GetInt32();
+            if (_sessions.Get(id) == null) return;
+            // Quote anything a shell would split or interpret; separate several paths with spaces.
+            static string Quote(string p) => p.Any(c => char.IsWhiteSpace(c) || "&()[]{}^=;!'+,`~$@#%".Contains(c)) ? $"\"{p}\"" : p;
+            Post(new { t = "pasteInto", id, text = string.Join(' ', paths.Select(Quote)), submit = false });
+        }
+        catch (Exception ex) { Log.Error("drop files", ex); }
+    }
+
     void OnWebMessage(string json)
     {
         try
@@ -280,6 +309,7 @@ sealed class MainWindow : Window, IDeckActions
                     PushTranscripts();
                     PushWorkflows();
                     PushAgentOptions();
+                    PushDictionary();
                     if (_hideWhenReady)
                     {
                         _hideWhenReady = false;
@@ -335,6 +365,12 @@ sealed class MainWindow : Window, IDeckActions
                                     Str("color"), Opt("icon") ?? "", Opt("model"), Opt("effort"));
                     break;
                 case "refreshAgentOptions": AgentCatalog.Refresh(); break;
+                case "tabOrder":
+                    _sessions.SetOrder(m.GetProperty("ids").EnumerateArray().Select(e => e.GetInt32()).ToArray());
+                    break;
+                case "saveDictionary":
+                    _dictionary.Save(m.GetProperty("terms").EnumerateArray().Select(t => t.GetString() ?? ""));
+                    break;
                 case "deleteWorkflow": _workflows.Remove(Str("id")); break;
                 case "moveWorkflow": _workflows.Move(Str("id"), Int("index")); break;
                 case "runWorkflow": RunWorkflowNow(Str("id")); break;
@@ -417,6 +453,8 @@ sealed class MainWindow : Window, IDeckActions
     {
         if (target is int id && _sessions.Get(id) is { } session)
         {
+            await WaitUntilReadyAsync(session);
+            if (_sessions.Get(id) == null) { await PasteAsync(text); return; } // closed while waiting
             bool onScreen = Input.IsForeground(_hwnd) && _projects.SelectedId == session.ProjectId &&
                             ActiveSessionId(session.ProjectId) == id;
             bool submit = submitRequested || !onScreen;
@@ -429,6 +467,24 @@ sealed class MainWindow : Window, IDeckActions
         {
             await Task.Delay(200); // gap so the app sees the paste and the Enter separately
             Input.Tap(Input.VK_RETURN);
+        }
+    }
+
+    /// <summary>
+    /// A just-launched agent needs a few seconds to start; text sent earlier would land in the PowerShell
+    /// underneath. Wait until it has drawn something and settled (0.8 s quiet), for at most 15 s.
+    /// </summary>
+    static async Task WaitUntilReadyAsync(Session session)
+    {
+        long now = Environment.TickCount64;
+        if (now - session.CreatedTicks > 30_000) return; // long-running sessions are already up
+        long deadline = now + 15_000;
+        while ((now = Environment.TickCount64) < deadline)
+        {
+            long lastOutput = Interlocked.Read(ref session.LastOutputTicks);
+            bool drewSomething = lastOutput > session.CreatedTicks;
+            if (drewSomething && now - session.CreatedTicks > 1500 && now - lastOutput > 800) return;
+            await Task.Delay(100);
         }
     }
 
@@ -482,12 +538,14 @@ sealed class MainWindow : Window, IDeckActions
 
     public void CloseSession(int sessionId) => Dispatcher.BeginInvoke(() => _sessions.Close(sessionId));
 
+    /// <summary>Deck launcher: open the agent in a new tab and start dictating into it straight away.</summary>
     public void Launch(AgentKind agent) => Dispatcher.BeginInvoke(() =>
     {
         if (StartSession(null, agent, "tab", null) is { } session)
         {
             Post(new { t = "activate", id = session.Id });
             ShowFromTray();
+            _dictation.StartFor(session.Id);
         }
     });
 

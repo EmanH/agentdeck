@@ -14,7 +14,9 @@ public sealed class Session
     public string? Title { get; set; }     // useful terminal title (e.g. Claude Code's task title)
     public string? Summary { get; set; }   // AI two-word summary of recent input
     public long LastOutputTicks;           // Environment.TickCount64 of the last output
+    public long CreatedTicks { get; init; } = Environment.TickCount64;
     public bool Done { get; set; }         // finished work the user hasn't looked at yet (the star)
+    public double SortKey { get; set; }    // tab order within the project (defaults to creation order)
     internal bool AwaitingWork;            // user submitted something; watching for work then quiet
     internal long WorkStartTicks;          // first output after that submit (0 = none yet)
     internal PseudoConsole Pty = null!;
@@ -23,6 +25,9 @@ public sealed class Session
     internal CancellationTokenSource? SummaryCts;
 
     public string Label => Title ?? Summary ?? DefaultName;
+    /// <summary>Working on something the user submitted: output since the submit, and recently.</summary>
+    public bool Working => AwaitingWork && Interlocked.Read(ref WorkStartTicks) != 0 &&
+                           Environment.TickCount64 - Interlocked.Read(ref LastOutputTicks) < 2000;
     public bool Busy => Environment.TickCount64 - Interlocked.Read(ref LastOutputTicks) < 1500;
 }
 
@@ -34,6 +39,10 @@ sealed class SessionManager
     public event Action? Changed;
     /// <summary>A terminal worked after the user submitted something and has now gone quiet.</summary>
     public event Action<Session>? Finished;
+    /// <summary>The set of working session ids changed (for the tab animation).</summary>
+    public event Action<int[]>? WorkingChanged;
+
+    int[] _working = [];
 
     // Agents redraw a spinner/timer the whole time they (or their background agents) are working, so
     // "submitted, then output for a while, then silence" means finished or waiting for the user.
@@ -45,7 +54,7 @@ sealed class SessionManager
     public SessionManager(OpenAiClient openai)
     {
         this.openai = openai;
-        _finishTimer = new Timer(_ => CheckFinished(), null, 500, 500);
+        _finishTimer = new Timer(_ => { CheckFinished(); CheckWorking(); }, null, 500, 500);
     }
 
     const string SummaryInstructions =
@@ -57,7 +66,20 @@ sealed class SessionManager
     int _nextId = 1;
 
     public Session[] Snapshot() { lock (_gate) return [.. _sessions]; }
-    public Session[] ForProject(string projectId) { lock (_gate) return _sessions.Where(s => s.ProjectId == projectId).ToArray(); }
+    /// <summary>A project's sessions in tab order.</summary>
+    public Session[] ForProject(string projectId)
+    {
+        lock (_gate) return _sessions.Where(s => s.ProjectId == projectId).OrderBy(s => s.SortKey).ThenBy(s => s.Id).ToArray();
+    }
+
+    /// <summary>The UI reordered tabs: remember the order (the Stream Deck follows it).</summary>
+    public void SetOrder(IReadOnlyList<int> ids)
+    {
+        lock (_gate)
+            for (int i = 0; i < ids.Count; i++)
+                if (_sessions.Find(s => s.Id == ids[i]) is { } s) s.SortKey = i;
+        Changed?.Invoke();
+    }
     public Session? Get(int id) { lock (_gate) return _sessions.Find(s => s.Id == id); }
 
     /// <param name="name">Label until the agent sets a title (e.g. the workflow's name).</param>
@@ -77,6 +99,7 @@ sealed class SessionManager
         lock (_gate)
         {
             session = new Session { Id = _nextId++, ProjectId = project.Id, Agent = agent };
+            session.SortKey = _sessions.Where(s => s.ProjectId == project.Id).Select(s => s.SortKey + 1).DefaultIfEmpty(0).Max(); // new tabs go last
             session.DefaultName = name ?? NextDefaultName(project.Id, agent);
             session.LastOutputTicks = Environment.TickCount64;
             _sessions.Add(session);
@@ -174,6 +197,14 @@ sealed class SessionManager
             Interlocked.Exchange(ref s.WorkStartTicks, 0);
             if (last - start >= MinWorkMs) Finished?.Invoke(s); // quick replies don't count
         }
+    }
+
+    void CheckWorking()
+    {
+        var working = Snapshot().Where(s => s.Working).Select(s => s.Id).Order().ToArray();
+        if (working.SequenceEqual(_working)) return;
+        _working = working;
+        WorkingChanged?.Invoke(working);
     }
 
     /// <summary>The user looked at this terminal: clear its star.</summary>

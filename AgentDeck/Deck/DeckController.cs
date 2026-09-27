@@ -56,6 +56,8 @@ sealed class DeckController : IDisposable
     readonly object _keyGate = new();
     readonly long[] _downAt = Enumerable.Repeat(-1L, KeyCount).ToArray();
     readonly KeyView?[] _heldView = new KeyView?[KeyCount];
+    readonly (bool down, long at)?[] _lastEvent = new (bool, long)?[KeyCount];
+    Action? _unsubscribe; // detaches our key handler from the current board
 
     // Project picker ("more") and workflow list modes; both close after a few idle seconds.
     volatile bool _pickerOpen, _workflowsOpen;
@@ -125,7 +127,11 @@ sealed class DeckController : IDisposable
         {
             var board = StreamDeckSharp.StreamDeck.OpenDevice();
             board.SetBrightness(70);
-            board.KeyStateChanged += (_, e) => OnKey(e.Key, e.IsDown);
+            // The library can revive a board we've already dropped after a USB blip; only the current
+            // board's events count, otherwise every press arrives twice.
+            EventHandler<KeyEventArgs> handler = (_, e) => { if (ReferenceEquals(board, _board)) OnKey(e.Key, e.IsDown); };
+            board.KeyStateChanged += handler;
+            _unsubscribe = () => board.KeyStateChanged -= handler;
             _board = board;
             Log.Info($"Stream Deck connected ({board.Keys.Count} keys)");
         }
@@ -143,11 +149,15 @@ sealed class DeckController : IDisposable
         var views = _views;
         if (key >= KeyCount || key >= views.Length) return;
         long now = Environment.TickCount64;
-        _pickerTouched = now;
         Action? fire = null;
 
         lock (_keyGate)
         {
+            // Safety net: a second identical event for the same key within 60 ms is a duplicate, not a person.
+            if (_lastEvent[key] is var (wasDown, at) && wasDown == down && now - at < 60) return;
+            _lastEvent[key] = (down, now);
+            _pickerTouched = now;
+
             if (down)
             {
                 // Press always acts immediately, so taps are never lost; a hold is an extra gesture on top.
@@ -274,7 +284,7 @@ sealed class DeckController : IDisposable
         var color = KeyArt.ParseColor(project.Color);
         int? activeId = _actions.ActiveSessionId(project.Id);
         int slot = 0;
-        foreach (var s in _sessions.ForProject(project.Id).OrderBy(s => s.Id))
+        foreach (var s in _sessions.ForProject(project.Id)) // tab order
         {
             if (slot >= SlotKeys.Length) break;
             int key = SlotKeys[slot++];
@@ -382,6 +392,8 @@ sealed class DeckController : IDisposable
 
     void DisposeBoard()
     {
+        try { _unsubscribe?.Invoke(); } catch (Exception) { }
+        _unsubscribe = null;
         try { _board?.Dispose(); } catch (Exception) { }
         _board = null;
     }

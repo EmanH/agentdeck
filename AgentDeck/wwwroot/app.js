@@ -24,6 +24,7 @@ const THEME = {
 const TERMINAL_FONT = '"Cascadia Mono", "AgentDeck Emoji", "Segoe UI Symbol", Consolas, monospace';
 
 const state = { projects: [], selected: null, sessions: new Map(), palette: [] };
+let working = new Set(); // session ids an agent is actively working in (tab/sidebar animation)
 const terms = new Map();       // session id -> pane record
 const workspaces = new Map();  // project id -> { tabs: [], activeTab }
 let tabSeq = 0;
@@ -96,6 +97,24 @@ function createPane(sid, projectId, agent) {
     }
   });
   new ResizeObserver(() => fitPane(pane)).observe(el);
+
+  // Drop files from Explorer: the host resolves their real paths and pastes them into this terminal.
+  const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+  el.addEventListener('dragover', e => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    el.classList.add('drop-target');
+  });
+  el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) el.classList.remove('drop-target'); });
+  el.addEventListener('drop', e => {
+    el.classList.remove('drop-target');
+    if (!hasFiles(e) || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setActivePane(pane);
+    bridge.postMessageWithAdditionalObjects({ t: 'dropFiles', id: sid }, e.dataTransfer.files);
+  });
   return pane;
 }
 
@@ -401,7 +420,8 @@ function renderSidebar() {
     const count = projectSessions.length;
     const done = p.id !== state.selected && projectSessions.some(s => s.done);
     const item = document.createElement('div');
-    item.className = 'project' + (p.id === state.selected ? ' selected' : '');
+    item.className = 'project' + (p.id === state.selected ? ' selected' : '')
+      + (projectSessions.some(s => working.has(s.id)) ? ' working' : '');
     item.style.setProperty('--c', p.color);
     item.draggable = true;
     item.title = p.path;
@@ -428,6 +448,7 @@ function renderSidebar() {
 }
 
 function renderTabs(project) {
+  if (draggingTab) return; // rebuilding the tabs mid-drag would cancel the drag
   const tabsEl = $('#tabs');
   if (!project) { tabsEl.replaceChildren(); return; }
   const ws = workspace(project.id);
@@ -438,9 +459,10 @@ function renderTabs(project) {
     const agent = session?.agent || pane?.agent || 'shell';
     const paneCount = leaves(tab.root).length;
     const done = leaves(tab.root).some(sid => state.sessions.get(sid)?.done);
+    const busy = leaves(tab.root).some(sid => working.has(sid));
     const el = document.createElement('div');
-    el.className = 'tab' + (tab === current ? ' active' : '');
-    el.innerHTML = `${agentIcon(agent)}<span class="label">${escapeHtml(session?.label || AGENT_NAMES[agent])}</span>
+    el.className = 'tab' + (tab === current ? ' active' : '') + (busy ? ' working' : '');
+    el.innerHTML = `<span class="tab-icon">${agentIcon(agent)}</span><span class="label">${escapeHtml(session?.label || AGENT_NAMES[agent])}</span>
       ${done ? '<span class="star" title="Finished">✦</span>' : ''}
       ${paneCount > 1 ? `<span class="panes">${paneCount}</span>` : ''}<button class="x" type="button" title="Close tab">✕</button>`;
     el.addEventListener('mousedown', e => {
@@ -452,8 +474,58 @@ function renderTabs(project) {
       focusActive();
     });
     el.querySelector('.x').addEventListener('click', () => closeTab(tab));
+    wireTabDrag(el, tab, project);
     return el;
   }));
+}
+
+// ---------------------------------------------------------------- tab reordering (drag and drop)
+
+const TAB_TYPE = 'application/x-agentdeck-tab'; // distinguishes a tab drag from a file drop
+let draggingTab = null;
+
+function wireTabDrag(el, tab, project) {
+  el.draggable = true;
+  const isTabDrag = e => [...(e.dataTransfer?.types || [])].includes(TAB_TYPE);
+  const clearMarks = () => el.classList.remove('drop-before', 'drop-after');
+
+  el.addEventListener('dragstart', e => {
+    draggingTab = tab;
+    e.dataTransfer.setData(TAB_TYPE, String(tab.id));
+    e.dataTransfer.effectAllowed = 'move';
+    requestAnimationFrame(() => el.classList.add('dragging'));
+  });
+  el.addEventListener('dragend', () => {
+    draggingTab = null;
+    renderTabs(selectedProject()); // catch up on anything skipped during the drag
+  });
+  el.addEventListener('dragover', e => {
+    if (!isTabDrag(e) || draggingTab === tab) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const r = el.getBoundingClientRect();
+    const before = e.clientX < r.left + r.width / 2;
+    el.classList.toggle('drop-before', before);
+    el.classList.toggle('drop-after', !before);
+  });
+  el.addEventListener('dragleave', clearMarks);
+  el.addEventListener('drop', e => {
+    if (!isTabDrag(e) || !draggingTab || draggingTab === tab) return;
+    e.preventDefault();
+    const after = el.classList.contains('drop-after');
+    clearMarks();
+    const tabs = workspace(project.id).tabs;
+    tabs.splice(tabs.indexOf(draggingTab), 1);
+    tabs.splice(tabs.indexOf(tab) + (after ? 1 : 0), 0, draggingTab);
+    draggingTab = null;
+    sendTabOrder(project.id);
+    render();
+  });
+}
+
+/** Tell the host the project's tab order (its sessions, left to right) so the Stream Deck matches. */
+function sendTabOrder(projectId) {
+  send({ t: 'tabOrder', ids: workspace(projectId).tabs.flatMap(t => leaves(t.root)) });
 }
 
 function renderEmpty(project, visible) {
@@ -643,6 +715,59 @@ function renderTranscripts() {
       if (target) { target.term.paste(text); target.term.focus(); }
     });
   }
+}
+
+// ---------------------------------------------------------------- dictation dictionary
+// Custom words for dictation: sent to Soniox as context terms and to the cleanup model, which swaps
+// near-miss transcriptions for the dictionary spelling.
+
+let dictionary = [];
+
+function showDictionary() {
+  transcriptsOpen = workflowsOpen = false;
+  renderDictionary();
+  $('#overlay').hidden = false;
+  $('#dict-input').focus();
+}
+
+function saveDictionary(terms) {
+  dictionary = terms;
+  send({ t: 'saveDictionary', terms });
+  renderDictionary();
+  $('#dict-input').focus();
+}
+
+function renderDictionary() {
+  const dialog = $('#dialog');
+  dialog.className = 'wide';
+  dialog.style.removeProperty('--pick');
+  dialog.innerHTML = `
+    <h2>Dictionary</h2>
+    <p>Names, jargon and product words you use in dictation. Soniox is told to listen for them, and the cleanup
+      swaps anything that sounds or looks close to one of them for your spelling.</p>
+    <div class="dict-row">
+      <textarea id="dict-input" rows="1" spellcheck="false" placeholder="Add words: separate with commas or new lines (e.g. AgentDeck, Soniox, ConPTY)"></textarea>
+      <button type="button" id="dict-add">Add</button>
+    </div>
+    <div class="dict-chips">${dictionary.length
+      ? dictionary.map((w, i) => `<span class="dict-chip">${escapeHtml(w)}<button type="button" data-remove="${i}" title="Remove">✕</button></span>`).join('')
+      : '<span class="muted">No custom words yet.</span>'}</div>
+    <div class="actions"><span class="muted dict-count">${dictionary.length} word${dictionary.length === 1 ? '' : 's'}</span><button type="submit" class="primary">Done</button></div>`;
+  dialog.onsubmit = e => { e.preventDefault(); closeDialog(); };
+
+  const input = $('#dict-input');
+  const add = () => {
+    const added = input.value.split(/[,\n]/).map(w => w.trim()).filter(Boolean);
+    if (!added.length) return;
+    const known = new Set(dictionary.map(w => w.toLowerCase()));
+    saveDictionary([...dictionary, ...added.filter(w => !known.has(w.toLowerCase()) && known.add(w.toLowerCase()))]);
+  };
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); add(); } // Shift+Enter for a new line
+  });
+  $('#dict-add').addEventListener('click', add);
+  for (const b of dialog.querySelectorAll('[data-remove]'))
+    b.addEventListener('click', () => saveDictionary(dictionary.filter((_, i) => i !== Number(b.dataset.remove))));
 }
 
 // ---------------------------------------------------------------- icons
@@ -945,6 +1070,7 @@ bridge.addEventListener('message', ({ data: m }) => {
         splitPane(m.relativeTo, m.id, m.placement === 'right' ? 'row' : 'col');
       else
         addTab(m.projectId, m.id);
+      sendTabOrder(m.projectId); // e.g. a split lands inside an earlier tab: keep the deck in tab order
       if (m.projectId === state.selected) {
         render();
         setActivePane(pane);
@@ -984,6 +1110,15 @@ bridge.addEventListener('message', ({ data: m }) => {
       if (workflowsOpen) renderWorkflows();
       render();
       break;
+    case 'working':
+      working = new Set(m.ids);
+      renderSidebar();
+      renderTabs(selectedProject());
+      break;
+    case 'dictionary':
+      dictionary = m.terms || [];
+      if (!$('#overlay').hidden && $('#dict-input') && !$('#dict-input').value) renderDictionary(); // only if showing and not mid-typing
+      break;
     case 'agentOptions':
       agentOptions = m.agents || {};
       onAgentOptions?.();
@@ -1003,12 +1138,15 @@ bridge.addEventListener('message', ({ data: m }) => {
 $('#add-project').addEventListener('click', () => send({ t: 'addProject' }));
 $('#recent').addEventListener('click', showTranscripts);
 $('#workflows').addEventListener('click', showWorkflows);
+$('#dictionary').addEventListener('click', showDictionary);
 $('#workflow-menu').addEventListener('click', e => workflowMenu(e.currentTarget));
 $('#new-tab').addEventListener('click', () => launch('shell'));
 $('#split-right').addEventListener('click', () => launch('shell', 'right'));
 $('#split-down').addEventListener('click', () => launch('shell', 'down'));
 for (const b of document.querySelectorAll('.launch')) b.addEventListener('click', () => launch(b.dataset.agent));
 window.addEventListener('focus', focusActive);
+// A file dropped anywhere other than a terminal must not navigate the app away to that file.
+for (const type of ['dragover', 'drop']) document.addEventListener(type, e => e.preventDefault());
 
 render();
 

@@ -14,7 +14,7 @@ public enum DictationState { Idle, Listening, Finishing, Error, Cancelled }
 /// <paramref name="captureTarget"/> runs at start and returns the AgentDeck terminal in focus (if any);
 /// <paramref name="deliver"/>(target, text, submitRequested) puts the text there, or into the focused app.
 /// </summary>
-sealed class DictationService(string? sonioxKey, OpenAiClient openai, TranscriptStore transcripts,
+sealed class DictationService(string? sonioxKey, OpenAiClient openai, TranscriptStore transcripts, DictionaryStore dictionary,
                                Func<int?> captureTarget, Func<int?, string, bool, Task> deliver)
 {
     const string CleanupInstructions = """
@@ -63,6 +63,19 @@ sealed class DictationService(string? sonioxKey, OpenAiClient openai, Transcript
         }
     }
 
+    /// <summary>
+    /// Start dictating into a specific AgentDeck terminal (e.g. one just launched from the deck). If already
+    /// listening, the current dictation is redirected there instead.
+    /// </summary>
+    public void StartFor(int sessionId)
+    {
+        lock (_gate)
+        {
+            if (State is DictationState.Idle or DictationState.Error or DictationState.Cancelled) Start(sessionId);
+            else if (State == DictationState.Listening) _target = sessionId;
+        }
+    }
+
     /// <summary>Discard the transcript being finished: nothing is pasted, saved or submitted.</summary>
     void Cancel()
     {
@@ -101,7 +114,7 @@ sealed class DictationService(string? sonioxKey, OpenAiClient openai, Transcript
         }
     }
 
-    void Start()
+    void Start(int? target = null)
     {
         if (sonioxKey == null)
         {
@@ -112,8 +125,8 @@ sealed class DictationService(string? sonioxKey, OpenAiClient openai, Transcript
         try
         {
             _submitAfterPaste = false;
-            _target = captureTarget();
-            _session = new SonioxSession(sonioxKey, MicCapture.SampleRate);
+            _target = target ?? captureTarget();
+            _session = new SonioxSession(sonioxKey, MicCapture.SampleRate, dictionary.Snapshot());
             _mic.Start(_session.Feed);
             _ = openai.WarmUpAsync();
             SetState(DictationState.Listening);
@@ -166,6 +179,17 @@ sealed class DictationService(string? sonioxKey, OpenAiClient openai, Transcript
         });
     }
 
+    /// <summary>The user's custom words, appended to the cleanup instructions (empty if there are none).</summary>
+    string DictionaryInstructions()
+    {
+        var terms = dictionary.Snapshot();
+        if (terms.Length == 0) return "";
+        return "\n\nCustom dictionary: these are known words and names the speaker uses. Always spell them exactly " +
+               "as written here. If a word or phrase in the dictation looks off, like a typo or mis-hearing, but is " +
+               "similar in sound or spelling to one of these, substitute the dictionary word. Never add a dictionary " +
+               "word the speaker didn't say.\n" + string.Join('\n', terms.Select(t => "- " + t));
+    }
+
     async Task<string> CleanAsync(string raw)
     {
         if (raw.Length == 0 || !openai.Enabled) return raw;
@@ -173,7 +197,7 @@ sealed class DictationService(string? sonioxKey, OpenAiClient openai, Transcript
         {
             // Longer dictation means a longer rewrite: allow 4 s plus 1 s per ~400 characters, up to 15 s.
             var timeout = TimeSpan.FromSeconds(Math.Min(15, 4 + raw.Length / 400.0));
-            var cleaned = await openai.RespondAsync(CleanupInstructions, raw, timeout);
+            var cleaned = await openai.RespondAsync(CleanupInstructions + DictionaryInstructions(), raw, timeout);
             return cleaned.Length > 0 ? cleaned : raw;
         }
         catch (Exception ex)
@@ -251,7 +275,8 @@ sealed class SonioxSession
     readonly Task _run;
     Exception? _error;
 
-    public SonioxSession(string apiKey, int sampleRate) => _run = Task.Run(() => RunAsync(apiKey, sampleRate));
+    /// <param name="terms">Custom vocabulary, passed to Soniox as context so it's recognised correctly.</param>
+    public SonioxSession(string apiKey, int sampleRate, string[] terms) => _run = Task.Run(() => RunAsync(apiKey, sampleRate, terms));
 
     public void Feed(byte[] pcm) => _audio.Writer.TryWrite(pcm);
 
@@ -263,7 +288,7 @@ sealed class SonioxSession
         lock (_final) return _final.ToString().Trim();
     }
 
-    async Task RunAsync(string apiKey, int sampleRate)
+    async Task RunAsync(string apiKey, int sampleRate, string[] terms)
     {
         using var ws = new ClientWebSocket();
         try
@@ -271,15 +296,17 @@ sealed class SonioxSession
             using (var connect = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
                 await ws.ConnectAsync(new Uri(Url), connect.Token);
 
-            var config = JsonSerializer.Serialize(new
+            var settings = new Dictionary<string, object>
             {
-                api_key = apiKey,
-                model = "stt-rt-v5",
-                audio_format = "pcm_s16le",
-                sample_rate = sampleRate,
-                num_channels = 1,
-                language_hints = new[] { "en" },
-            });
+                ["api_key"] = apiKey,
+                ["model"] = "stt-rt-v5",
+                ["audio_format"] = "pcm_s16le",
+                ["sample_rate"] = sampleRate,
+                ["num_channels"] = 1,
+                ["language_hints"] = new[] { "en" },
+            };
+            if (terms.Length > 0) settings["context"] = new { terms };
+            var config = JsonSerializer.Serialize(settings);
             await ws.SendAsync(Encoding.UTF8.GetBytes(config), WebSocketMessageType.Text, true, CancellationToken.None);
 
             var receive = ReceiveAsync(ws);
