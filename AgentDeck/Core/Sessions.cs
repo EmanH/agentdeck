@@ -136,21 +136,39 @@ sealed class SessionManager
 
     /// <summary>
     /// PowerShell command that starts the agent with an initial prompt (all three CLIs take one as their first
-    /// argument). The prompt travels via a temp file so the command line stays short, and is escaped for
-    /// Windows argv parsing: PowerShell 5.1 doesn't escape embedded quotes when calling native programs.
+    /// argument). The prompt travels via a temp file so the command line stays short. PowerShell 5.1 mangles
+    /// native arguments containing quotes (splits them, drops empty ones), so we quote the prompt ourselves
+    /// and hand it over verbatim with --% and an environment variable, which it expands without re-parsing.
     /// </summary>
     static string AgentWithPromptCommand(string exe, string prompt, string args)
     {
         var dir = Path.Combine(Log.Dir, "prompts");
         Directory.CreateDirectory(dir);
         var file = Path.Combine(dir, $"{Guid.NewGuid():N}.txt");
-        File.WriteAllText(file, prompt, new UTF8Encoding(false));
+        File.WriteAllText(file, QuoteArg(prompt), new UTF8Encoding(false));
         var quoted = "'" + file.Replace("'", "''") + "'";
         var script =
-            $"$p = [IO.File]::ReadAllText({quoted}); Remove-Item -LiteralPath {quoted}; " +
-            "$p = $p -replace '(\\\\*)\"', '$1$1\\\"' -replace '(\\\\+)$', '$1$1'; " +
-            $"& {exe} {args} $p";
+            $"$env:AGENTDECK_PROMPT = [IO.File]::ReadAllText({quoted}); Remove-Item -LiteralPath {quoted}\n" +
+            // `--` ends option parsing, so a prompt starting with "-" (e.g. a bullet list) isn't read as a flag.
+            $"& {exe} --% {args} -- %AGENTDECK_PROMPT%\n" + // --% takes the rest of the line, so nothing may follow it
+            "Remove-Item Env:AGENTDECK_PROMPT";
         return "powershell.exe -NoLogo -NoExit -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
+    }
+
+    /// <summary>Quotes one argument for Windows argv parsing (CommandLineToArgvW / MSVC rules).</summary>
+    static string QuoteArg(string s)
+    {
+        var sb = new StringBuilder("\"");
+        int backslashes = 0;
+        foreach (char c in s)
+        {
+            if (c == '\\') { backslashes++; continue; }
+            // Backslashes are literal unless they precede a quote; there they (and the quote) need escaping.
+            sb.Append('\\', c == '"' ? backslashes * 2 + 1 : backslashes);
+            backslashes = 0;
+            sb.Append(c);
+        }
+        return sb.Append('\\', backslashes * 2).Append('"').ToString(); // before the closing quote
     }
 
     /// <summary>Each CLI's own flags for model and thinking level. Values are restricted to a safe charset.</summary>
