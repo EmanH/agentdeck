@@ -396,6 +396,7 @@ sealed class MainWindow : Window, IDeckActions
     {
         var workflow = _workflows.Get(workflowId);
         if (workflow == null || _projects.Get(workflow.ProjectId) is not { } project) return;
+        _dictation.CancelAutoStarted(); // a workflow brings its own prompt: don't leave a launcher's mic listening
         if (_projects.Select(project.Id)) PushState();
         Log.Info($"Running workflow {workflow.Name} in {project.Name} ({workflow.Agent}, model {workflow.Model ?? "default"}, effort {workflow.Effort ?? "default"})");
         if (StartSession(project.Id, workflow.Agent, "tab", null, workflow.Name, workflow.Instructions, workflow.Model, workflow.Effort) is { } session)

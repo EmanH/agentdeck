@@ -42,6 +42,7 @@ sealed class DictationService(string? sonioxKey, OpenAiClient openai, Transcript
     SonioxSession? _session;
     bool _submitAfterPaste;
     int? _target; // AgentDeck terminal that had focus when dictation started
+    bool _autoStarted; // started by launching a terminal (StartFor), not by the user pressing the mic
     long _stoppedAt;
     CancellationTokenSource? _finishCts; // cancels the in-flight transcript (double-tap)
 
@@ -71,8 +72,25 @@ sealed class DictationService(string? sonioxKey, OpenAiClient openai, Transcript
     {
         lock (_gate)
         {
-            if (State is DictationState.Idle or DictationState.Error or DictationState.Cancelled) Start(sessionId);
+            if (State is DictationState.Idle or DictationState.Error or DictationState.Cancelled) { Start(sessionId); _autoStarted = true; }
             else if (State == DictationState.Listening) _target = sessionId;
+        }
+    }
+
+    /// <summary>
+    /// Turn off a mic that launching a terminal switched on (e.g. a workflow starts right after), discarding what
+    /// it heard. Dictation the user started themselves is left alone.
+    /// </summary>
+    public void CancelAutoStarted()
+    {
+        lock (_gate)
+        {
+            if (State != DictationState.Listening || !_autoStarted) return;
+            _mic.Stop();
+            Chime.PlayMicOff();
+            _ = _session!.FinishAsync(); // closes the Soniox stream; the transcript is thrown away
+            Log.Info("Dictation cancelled: a workflow started");
+            SetState(DictationState.Cancelled);
         }
     }
 
@@ -125,9 +143,11 @@ sealed class DictationService(string? sonioxKey, OpenAiClient openai, Transcript
         try
         {
             _submitAfterPaste = false;
+            _autoStarted = false;
             _target = target ?? captureTarget();
             _session = new SonioxSession(sonioxKey, MicCapture.SampleRate, dictionary.Snapshot());
             _mic.Start(_session.Feed);
+            Chime.PlayMicOn();
             _ = openai.WarmUpAsync();
             SetState(DictationState.Listening);
         }
@@ -142,6 +162,7 @@ sealed class DictationService(string? sonioxKey, OpenAiClient openai, Transcript
     void Stop()
     {
         _mic.Stop();
+        Chime.PlayMicOff();
         _stoppedAt = Environment.TickCount64;
         SetState(DictationState.Finishing);
         var session = _session!;
