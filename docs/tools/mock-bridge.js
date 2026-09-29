@@ -76,8 +76,10 @@
     ` ${green}✓${R} PATCH /sessions/:id rejects stale token ${grey}(19ms)${R}\n\n` +
     `${green}${B}All 42 API tests passing${R} ⚡\n`);
 
+  const branches = { p1: 'main', p2: 'feature/pricing-page', p3: 'fix/login-crash', p4: 'main' }; // Docs: not a repo
+
   function start() {
-    emit({ t: 'state', projects, selected: 'p1', sessions, palette });
+    emit({ t: 'state', projects, selected: 'p1', sessions, branches, palette });
     emit({ t: 'workflows', items: workflows });
     emit({
       t: 'agentOptions', agents: {

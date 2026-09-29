@@ -23,7 +23,9 @@ const THEME = {
 // Cascadia first; then colour emoji (limited by unicode-range in app.css); then monochrome symbols.
 const TERMINAL_FONT = '"Cascadia Mono", "AgentDeck Emoji", "Segoe UI Symbol", Consolas, monospace';
 
-const state = { projects: [], selected: null, sessions: new Map(), palette: [] };
+const state = { projects: [], selected: null, sessions: new Map(), branches: {}, palette: [] };
+
+const BRANCH_ICON = '<svg class="branch-icon" viewBox="0 0 16 16"><circle cx="4.5" cy="3.5" r="1.6"/><circle cx="4.5" cy="12.5" r="1.6"/><circle cx="11.5" cy="5" r="1.6"/><path d="M4.5 5.1v5.8M11.5 6.6c0 3-7 2.2-7 4.3"/></svg>';
 let working = new Set(); // session ids an agent is actively working in (tab/sidebar animation)
 const terms = new Map();       // session id -> pane record
 const workspaces = new Map();  // project id -> { tabs: [], activeTab }
@@ -398,6 +400,7 @@ function render() {
   document.documentElement.style.setProperty('--accent', project?.color || '#3b82f6');
   renderSidebar();
   renderTabs(project);
+  renderBranch(project);
 
   // Show only the selected project's active tab.
   const shown = project ? activeTab(project.id) : null;
@@ -426,7 +429,9 @@ function renderSidebar() {
     item.draggable = true;
     item.title = p.path;
     item.innerHTML = `${p.icon && iconUrl(p.icon) ? `<span class="tile">${iconImg(p.icon, 18)}</span>` : '<span class="swatch"></span>'}
-      <div class="meta"><div class="name">${escapeHtml(p.name)}</div><div class="path">${escapeHtml(p.path)}</div></div>
+      <div class="meta"><div class="name">${escapeHtml(p.name)}</div>${state.branches[p.id]
+        ? `<div class="branch">${BRANCH_ICON}<span>${escapeHtml(state.branches[p.id])}</span></div>`
+        : `<div class="path">${escapeHtml(p.path)}</div>`}</div>
       ${done ? '<span class="star" title="A terminal finished">✦</span>' : ''}
       ${count ? `<span class="count">${count}</span>` : ''}`;
     item.addEventListener('click', () => selectProject(p.id));
@@ -445,6 +450,16 @@ function renderSidebar() {
     });
     return item;
   }));
+}
+
+// The selected project's git branch, in the tab bar next to the launchers.
+function renderBranch(project) {
+  const el = $('#branch');
+  const branch = project && state.branches[project.id];
+  el.hidden = !branch;
+  if (!branch) return;
+  el.innerHTML = `${BRANCH_ICON}<span>${escapeHtml(branch)}</span>`;
+  el.title = `${project.name} is on branch ${branch}`;
 }
 
 function renderTabs(project) {
@@ -1057,6 +1072,7 @@ bridge.addEventListener('message', ({ data: m }) => {
       state.projects = m.projects;
       state.selected = m.selected;
       state.palette = m.palette;
+      state.branches = m.branches || {};
       state.sessions = new Map(m.sessions.map(s => [s.id, s]));
       render();
       if (projectChanged) focusActive(); // e.g. picked from the Stream Deck: focus that project's terminal

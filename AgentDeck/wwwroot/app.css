@@ -103,6 +103,9 @@ button { font: inherit; color: inherit; }
 .project .name, .project .path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project .name { font-weight: 600; color: #f2f2f2; }
 .project .path { font-size: 11px; color: var(--faint); direction: rtl; text-align: left; }
+.project .branch { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); min-width: 0; }
+.project .branch span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.branch-icon { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.3; }
 .project .count {
   flex: none;
   min-width: 20px;
@@ -449,6 +452,21 @@ svg .fill { fill: #a855f7; stroke: #a855f7; }
 #launchers { margin-left: auto; display: flex; align-items: center; gap: 6px; align-self: center; }
 #launchers .icon-btn { margin: 0; }
 .divider { width: 1px; height: 18px; background: #333; margin: 0 4px; }
+
+#branch {
+  display: flex; align-items: center; gap: 6px;
+  height: 26px; max-width: 260px;
+  padding: 0 10px;
+  margin-right: 4px;
+  border-radius: 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: #f2f2f2;
+  font: 12px "Cascadia Mono", Consolas, monospace;
+}
+#branch[hidden] { display: none; }
+#branch span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#branch .branch-icon { width: 14px; height: 14px; color: var(--accent); }
 
 .launch {
   display: flex; align-items: center; gap: 7px;

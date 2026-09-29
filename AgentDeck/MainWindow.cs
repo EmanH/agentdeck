@@ -39,6 +39,8 @@ sealed class MainWindow : Window, IDeckActions
     readonly Dictionary<int, StringBuilder> _pendingOutput = [];
     readonly List<string> _outbox = [];
     readonly DispatcherTimer _flushTimer;
+    readonly DispatcherTimer _branchTimer;
+    Dictionary<string, string?> _branches = [];
     bool _webReady, _stateQueued, _quitting, _hideWhenReady;
     IntPtr _hwnd;
 
@@ -81,6 +83,10 @@ sealed class MainWindow : Window, IDeckActions
         FirstRunSetup();
 
         _flushTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(8), DispatcherPriority.Normal, (_, _) => FlushOutput(), Dispatcher);
+        // Poll each project's git branch so a checkout in any terminal shows up within a couple of seconds.
+        _branches = ReadBranches();
+        _branchTimer = new DispatcherTimer(TimeSpan.FromSeconds(2), DispatcherPriority.Background, async (_, _) => await RefreshBranchesAsync(), Dispatcher);
+        _branchTimer.Start();
         SourceInitialized += (_, _) =>
         {
             _hwnd = new WindowInteropHelper(this).Handle;
@@ -216,8 +222,19 @@ sealed class MainWindow : Window, IDeckActions
             projects = _projects.Snapshot(),
             selected = _projects.SelectedId,
             sessions,
+            branches = _branches,
             palette = ProjectStore.Palette,
         });
+    }
+
+    Dictionary<string, string?> ReadBranches() => _projects.Snapshot().ToDictionary(p => p.Id, p => GitBranch.Of(p.Path));
+
+    async Task RefreshBranchesAsync()
+    {
+        var branches = await Task.Run(ReadBranches);
+        if (branches.Count == _branches.Count && branches.All(b => _branches.TryGetValue(b.Key, out var old) && old == b.Value)) return;
+        _branches = branches;
+        QueueState();
     }
 
     /// <summary>An agent (or command) finished: chime, and star it unless it's the terminal on screen right now.</summary>
