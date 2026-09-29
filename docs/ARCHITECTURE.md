@@ -39,6 +39,11 @@ touches the OS: pseudo consoles, the Stream Deck, the microphone, the global hot
 | `saveWorkflow`, `runWorkflow`, `deleteWorkflow`, `refreshAgentOptions` | `workflows`, `agentOptions`, `transcripts` |
 | `openUrl`, `openFolder`, `addProject` | `pasteInto`, `projectDialog`, `workflowEditor` |
 | `saveDictionary`, `tabOrder`, `dropFiles` (+ `File` objects) | `dictionary`, `working` |
+| `screen` (a terminal's last 80 rendered lines, every 30 s while changing) | `state` also carries each project's git branch |
+
+`screen` feeds `SessionAnalyzer`: one `gpt-6-luna` call titles the terminal (2-4 words, kept unless the work
+moved on) and one TypeSafe Jev `choice` picks its icon from `SessionIcons` (a new icon must beat the current
+one by 15 points, so near-ties don't flicker). Branches come from reading `.git/HEAD` every 2 s (`GitBranch`).
 
 Dropped files reach the host via `postMessageWithAdditionalObjects`, which exposes each file's real path
 (`CoreWebView2File.Path`); the host quotes the paths and pastes them into that terminal.
@@ -57,7 +62,8 @@ without the app, and is how the README screenshots are made.
 - Modes: normal (projects / sessions / launchers), project picker (more than three projects) and the workflow
   list. Both overlays close after 10 idle seconds.
 - `Deck/KeyArt.cs` draws every key with SkiaSharp at 72×72: fitted, wrapped bold labels, SVG agent logos, and
-  Fluent Emoji icons rendered via Svg.Skia.
+  Fluent Emoji icons rendered via Svg.Skia. Session keys put the title on top and the session's icon beneath
+  (the agent logo until one is picked).
 
 ## Dictation
 
@@ -104,5 +110,5 @@ Stream Deck renderer.
 | What | Where |
 |---|---|
 | Projects, workflows, last 10 transcripts | `%APPDATA%\AgentDeck\*.json` |
-| Log (timings only, no transcript text) | `%LOCALAPPDATA%\AgentDeck\agentdeck.log` |
+| Log (timings and session titles, no transcript or terminal text) | `%LOCALAPPDATA%\AgentDeck\agentdeck.log` |
 | Installed app | `%LOCALAPPDATA%\Programs\AgentDeck` (self-contained, so .NET updates can't break it) |

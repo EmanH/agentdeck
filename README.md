@@ -25,7 +25,8 @@ works exactly as it does in your usual terminal. AgentDeck only adds a thin laye
 
 - **Sessions grouped by project:** every project is a folder with its own tabs, split panes and agents; switch projects and they're right where you left them.
 - **Mix agents freely:** Claude, Codex, Grok and plain shells side by side, each opened in the project folder in one press.
-- **See every session at once:** live labels, busy dots and ✦ finished alerts in the tabs and on the Stream Deck, so you know which agent needs you.
+- **See every session at once:** AI titles and icons that follow each conversation, busy dots and ✦ finished alerts in the tabs and on the Stream Deck, so you know which agent needs you.
+- **Know where you are:** each project's current git branch, in the sidebar and the tab bar, updated as you check out.
 - **Jump anywhere:** one key press brings any session to the front, in any project.
 
 ## 🎙️ System-wide voice dictation: a Wispr Flow alternative
@@ -38,6 +39,7 @@ Same flow as Wispr Flow: press a key, talk, press again, clean text appears. **W
 - **Targeted:** dictation started in an AgentDeck terminal lands in *that* terminal (and is submitted) even if you've switched apps.
 - **Launch and talk:** a deck *+ Claude / + Codex / + Grok* key opens the agent and starts dictating into it immediately; the text waits until the agent is ready.
 - **Custom dictionary:** your names and jargon are sent to Soniox as context and to the cleanup, which fixes near-misses (*sonics* → *Soniox*).
+- **Audio cues:** a soft rising pop when the mic opens, the same pop falling when it closes.
 - **Enter** mid-dictation = stop, paste, submit. **Double-tap** the mic = cancel.
 - **Safety net:** last 10 transcripts in *Recent dictations*; a *Paste again* key for 10 s after each one.
 
@@ -48,7 +50,9 @@ Same flow as Wispr Flow: press a key, talk, press again, clean text appears. **W
 | **Projects** | Each project is a folder with its own icon, color, terminals and workflows. |
 | **Terminals** | Real ConPTY terminals (same as Windows Terminal) rendered with xterm.js/WebGL: tabs (drag to reorder), split panes, 24-bit color, color emoji. Drop files on a terminal to paste their paths. Agent TUIs run unchanged. |
 | **Agents** | One press/click/shortcut opens Claude, Codex or Grok in the project folder. |
-| **Stream Deck** | Projects, live sessions (logo + 2-word label), launchers, workflows, Enter, mic. Tap to jump, hold 0.8 s to close. No Elgato software needed. |
+| **Stream Deck** | Projects, live sessions (title + icon), launchers, workflows, Enter, mic. Tap to jump, hold 0.8 s to close. No Elgato software needed. |
+| **Session titles & icons** | Every 30 s, terminals whose screen changed get a 2-4 word title (`gpt-6-luna`) and an emoji picked by the TypeSafe Jev classifier from ~160 work-themed icons. Idle terminals cost nothing. |
+| **Git branch** | The selected project's branch in the tab bar; every project's branch in the sidebar. |
 | **Live status** | Working tabs show a spinning ring and shimmer; when an agent goes quiet after working: soft pop + ✦ on its key, tab and project. |
 | **Workflows** | Saved prompt + agent + model + thinking level, per project. One press opens a tab with the agent already working. |
 | **Model discovery** | Models and thinking levels are read from the CLIs at runtime, so new ones appear without an update. |
@@ -83,7 +87,8 @@ No SDK? Download `AgentDeck-*-win-x64.zip` from [Releases](https://github.com/Em
 | Env var | For |
 |---|---|
 | `SONIOX_API_KEY` | Dictation (required for dictation) |
-| `OPENAI_API_KEY` | Transcript cleanup and session labels (optional) |
+| `OPENAI_API_KEY` | Transcript cleanup and session titles (optional) |
+| `TYPESAFE_AI_API_KEY` | Session icons on the Stream Deck (optional) |
 
 Agent CLIs on `PATH`: `claude`, `codex`, `grok`.
 
@@ -99,7 +104,7 @@ Agent CLIs on `PATH`: `claude`, `codex`, `grok`.
 
 ## Privacy
 
-Audio goes to Soniox only while the mic is on. Transcripts, and for untitled sessions your last few typed lines, go to OpenAI if `OPENAI_API_KEY` is set. Transcripts are stored locally (`%APPDATA%\AgentDeck`); logs contain timings only.
+Audio goes to Soniox only while the mic is on. Transcripts, and for untitled sessions your last few typed lines, go to OpenAI if `OPENAI_API_KEY` is set. To title and icon a terminal, the last 80 lines of its screen go to OpenAI and TypeSafe (whichever keys are set) every 30 s while it's changing. Transcripts are stored locally (`%APPDATA%\AgentDeck`); logs contain timings and session titles, never transcript or terminal text.
 
 ## More
 
