@@ -1063,6 +1063,29 @@ function workflowMenu(anchor) {
   ]);
 }
 
+// ---------------------------------------------------------------- screen text for titles and icons
+
+// Every 30 s, each terminal whose output changed sends the tail of its screen to the host, which names it and
+// picks its Stream Deck icon. The rendered buffer is clean text, unlike the raw stream of TUI redraws.
+const SCREEN_PUSH_MS = 30000, SCREEN_LINES = 80;
+
+function screenText(term) {
+  const buffer = term.buffer.active;
+  const lines = [];
+  for (let i = Math.max(0, buffer.length - SCREEN_LINES); i < buffer.length; i++)
+    lines.push(buffer.getLine(i)?.translateToString(true) ?? '');
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+setInterval(() => {
+  for (const pane of terms.values()) {
+    if (!pane.screenDirty) continue;
+    pane.screenDirty = false;
+    const text = screenText(pane.term);
+    if (text) send({ t: 'screen', id: pane.sid, text });
+  }
+}, SCREEN_PUSH_MS);
+
 // ---------------------------------------------------------------- messages from C#
 
 bridge.addEventListener('message', ({ data: m }) => {
@@ -1093,9 +1116,13 @@ bridge.addEventListener('message', ({ data: m }) => {
       }
       break;
     }
-    case 'output':
-      terms.get(m.id)?.term.write(m.data);
+    case 'output': {
+      const pane = terms.get(m.id);
+      if (!pane) break;
+      pane.term.write(m.data);
+      pane.screenDirty = true;
       break;
+    }
     case 'exited': {
       const pane = terms.get(m.id);
       if (!pane) break;

@@ -295,7 +295,7 @@ sealed class DeckController : IDisposable
             bool done = s.Done;
             var session = s;
             views[key] = new KeyView(
-                $"s|{s.Id}|{s.Agent}|{s.Label}|{project.Color}|{active}|{pulseStep}|{(int)(hold * 40)}|{done}",
+                $"s|{s.Id}|{s.Agent}|{s.Label}|{s.Icon}|{project.Color}|{active}|{pulseStep}|{(int)(hold * 40)}|{done}",
                 c => { KeyArt.Session(c, session, color, active, pulse, done); KeyArt.HoldRing(c, hold); },
                 Press: () => _actions.ActivateSession(session.Id),
                 Hold: () => _actions.CloseSession(session.Id));

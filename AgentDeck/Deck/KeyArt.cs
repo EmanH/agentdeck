@@ -280,18 +280,20 @@ static class KeyArt
 
     public static void Session(SKCanvas canvas, Session session, SKColor projectColor, bool active, float busyPulse, bool done = false)
     {
-        if (done) Star(canvas, 12, 19);
         if (active)
         {
             using var border = Stroke(projectColor, 2.2f);
             canvas.DrawRoundRect(new SKRect(2.5f, 2.5f, 69.5f, 69.5f), 11, 11, border);
         }
-        DrawLogo(canvas, session.Agent, new SKRect(25, 7, 47, 29));
-        DrawFittedText(canvas, session.Label, new SKRect(5, 32, 67, 68), 16, 9, 2, SKColors.White);
+        // Title on top, the icon picked for the conversation beneath (the agent's logo until one is picked).
+        DrawFittedText(canvas, session.Label, new SKRect(5, 5, 67, 32), 14, 8.5f, 2, SKColors.White);
+        if (!DrawIcon(canvas, session.Icon, new SKRect(21, 35, 51, 65)))
+            DrawLogo(canvas, session.Agent, new SKRect(25, 39, 47, 61));
+        if (done) Star(canvas, 12, 66, 15);
         if (busyPulse >= 0)
         {
             using var dot = Fill(projectColor.WithAlpha((byte)(90 + 165 * busyPulse)));
-            canvas.DrawCircle(62, 10, 3.4f, dot);
+            canvas.DrawCircle(62, 61, 3.4f, dot);
         }
     }
 

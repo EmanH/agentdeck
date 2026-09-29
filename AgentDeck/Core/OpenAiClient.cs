@@ -34,7 +34,9 @@ sealed class OpenAiClient
         catch (Exception) { }
     }
 
-    public async Task<string> RespondAsync(string instructions, string input, TimeSpan timeout, CancellationToken ct = default)
+    /// <param name="priority">Priority tier: faster, but costs more. Background work passes false.</param>
+    public async Task<string> RespondAsync(string instructions, string input, TimeSpan timeout, CancellationToken ct = default,
+                                           bool priority = true)
     {
         if (_http == null) throw new InvalidOperationException("OPENAI_API_KEY is not set.");
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -45,7 +47,7 @@ sealed class OpenAiClient
             instructions,
             input,
             reasoning = new { effort = "none" },
-            service_tier = "priority",
+            service_tier = priority ? "priority" : "default",
         };
         using var response = await _http.PostAsJsonAsync("v1/responses", body, cts.Token);
         if (!response.IsSuccessStatusCode)

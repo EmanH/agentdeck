@@ -31,6 +31,7 @@ sealed class MainWindow : Window, IDeckActions
     readonly DictionaryStore _dictionary = new();
     readonly OpenAiClient _openai = new(Env.Get("OPENAI_API_KEY"));
     readonly SessionManager _sessions;
+    readonly SessionAnalyzer _analyzer;
     readonly DictationService _dictation;
     readonly DeckController _deck;
     readonly TrayIcon _tray;
@@ -58,6 +59,7 @@ sealed class MainWindow : Window, IDeckActions
         Content = _web;
 
         _sessions = new SessionManager(_openai);
+        _analyzer = new SessionAnalyzer(_sessions, _openai, new TypeSafeClient(Env.Get("TYPESAFE_AI_API_KEY")));
         _sessions.Output += OnSessionOutput;
         _sessions.Exited += s => Dispatcher.BeginInvoke(() => Post(new { t = "exited", id = s.Id }));
         _sessions.Changed += QueueState;
@@ -338,6 +340,7 @@ sealed class MainWindow : Window, IDeckActions
                 case "input": _sessions.Write(Int("id"), Str("data")); break;
                 case "resize": _sessions.Resize(Int("id"), Int("cols"), Int("rows")); break;
                 case "title": _sessions.SetTitle(Int("id"), Str("title")); break;
+                case "screen": _analyzer.OnScreen(Int("id"), Str("text")); break;
                 case "close": _sessions.Close(Int("id")); break;
                 case "focus":
                     var focused = _sessions.Get(Int("id"));

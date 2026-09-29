@@ -13,6 +13,8 @@ public sealed class Session
     public string DefaultName { get; set; } = "";
     public string? Title { get; set; }     // useful terminal title (e.g. Claude Code's task title)
     public string? Summary { get; set; }   // AI two-word summary of recent input
+    public string? Topic { get; set; }     // AI 2-4 word title from the screen, refreshed as the work moves on
+    public string? Icon { get; set; }      // Fluent Emoji name picked for the screen (Stream Deck key)
     public long LastOutputTicks;           // Environment.TickCount64 of the last output
     public long CreatedTicks { get; init; } = Environment.TickCount64;
     public bool Done { get; set; }         // finished work the user hasn't looked at yet (the star)
@@ -23,8 +25,11 @@ public sealed class Session
     internal readonly StringBuilder Line = new();
     internal readonly List<string> Inputs = [];
     internal CancellationTokenSource? SummaryCts;
+    internal bool Analyzing;               // SessionAnalyzer: a title/icon analysis is in flight
+    internal int ScreenHash;               // SessionAnalyzer: the screen last analysed
+    internal long AnalyzedTicks;           // SessionAnalyzer: when
 
-    public string Label => Title ?? Summary ?? DefaultName;
+    public string Label => Topic ?? Title ?? Summary ?? DefaultName;
     /// <summary>Working on something the user submitted: output since the submit, and recently.</summary>
     public bool Working => AwaitingWork && Interlocked.Read(ref WorkStartTicks) != 0 &&
                            Environment.TickCount64 - Interlocked.Read(ref LastOutputTicks) < 2000;
@@ -81,6 +86,9 @@ sealed class SessionManager
         Changed?.Invoke();
     }
     public Session? Get(int id) { lock (_gate) return _sessions.Find(s => s.Id == id); }
+
+    /// <summary>Something outside (e.g. the analyzer) changed a session's label or icon.</summary>
+    public void NotifyChanged() => Changed?.Invoke();
 
     /// <param name="name">Label until the agent sets a title (e.g. the workflow's name).</param>
     /// <param name="prompt">Initial prompt: the agent starts with it already submitted.</param>

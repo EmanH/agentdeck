@@ -18,9 +18,9 @@ static class DeckMock
         var agentDeck = new Project { Name = "AgentDeck", Color = "#3b82f6", Icon = "rocket" };
         var website = new Project { Name = "Website", Color = "#22c55e", Icon = "globe-showing-americas" };
         var blue = KeyArt.ParseColor(agentDeck.Color);
-        var claude = new Session { Id = 1, ProjectId = "", Agent = AgentKind.Claude, Title = "Fix Login Bug" };
-        var codex = new Session { Id = 2, ProjectId = "", Agent = AgentKind.Codex, Summary = "Deploy Script" };
-        var grok = new Session { Id = 3, ProjectId = "", Agent = AgentKind.Grok, Summary = "API Tests" };
+        var claude = new Session { Id = 1, ProjectId = "", Agent = AgentKind.Claude, Topic = "Login Cookie Bug", Icon = "bug" };
+        var codex = new Session { Id = 2, ProjectId = "", Agent = AgentKind.Codex, Topic = "Deploy Script", Icon = "rocket" };
+        var grok = new Session { Id = 3, ProjectId = "", Agent = AgentKind.Grok, Topic = "API Test Suite", Icon = "test-tube" };
         string[] moreColors = ["#f59e0b", "#a855f7", "#ec4899"];
 
         Render(Path.Combine(dir, "deck-main.png"),
