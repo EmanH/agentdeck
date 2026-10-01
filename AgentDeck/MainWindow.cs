@@ -175,6 +175,18 @@ sealed class MainWindow : Window, IDeckActions
             core.Settings.AreDevToolsEnabled = Debugger.IsAttached;
             core.SetVirtualHostNameToFolderMapping("agentdeck.example", Path.Combine(AppContext.BaseDirectory, "wwwroot"),
                                                    CoreWebView2HostResourceAccessKind.Allow);
+            // Links never open inside AgentDeck: popups and navigations away from the app go to the default browser.
+            core.NewWindowRequested += (_, e) =>
+            {
+                e.Handled = true;
+                OpenInBrowser(e.Uri);
+            };
+            core.NavigationStarting += (_, e) =>
+            {
+                if (e.Uri.StartsWith("https://agentdeck.example/", StringComparison.OrdinalIgnoreCase)) return;
+                e.Cancel = true;
+                OpenInBrowser(e.Uri);
+            };
             core.PermissionRequested += (_, e) =>
             {
                 if (e.PermissionKind == CoreWebView2PermissionKind.ClipboardRead) e.State = CoreWebView2PermissionState.Allow;
@@ -373,10 +385,6 @@ sealed class MainWindow : Window, IDeckActions
                     _projects.Remove(Str("id"));
                     PushState();
                     break;
-                case "moveProject":
-                    _projects.Move(Str("id"), Int("index"));
-                    PushState();
-                    break;
                 case "saveWorkflow":
                     var wfId = m.TryGetProperty("id", out var wfIdEl) ? wfIdEl.GetString() : null;
                     var wfProject = Opt("projectId") ?? _projects.SelectedId;
@@ -398,17 +406,21 @@ sealed class MainWindow : Window, IDeckActions
                     var project = _projects.Get(Str("id"));
                     if (project != null && Directory.Exists(project.Path)) Process.Start("explorer.exe", project.Path);
                     break;
-                case "openUrl":
-                    var uri = Str("uri");
-                    if (uri.StartsWith("http://") || uri.StartsWith("https://"))
-                        Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
-                    break;
+                case "openUrl": OpenInBrowser(Str("uri")); break;
             }
         }
         catch (Exception ex)
         {
             Log.Error($"web message {json[..Math.Min(json.Length, 200)]}", ex);
         }
+    }
+
+    /// <summary>Open a web link in the user's default browser (http/https only: never files or other schemes).</summary>
+    static void OpenInBrowser(string? uri)
+    {
+        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed) || parsed.Scheme is not ("http" or "https")) return;
+        try { Process.Start(new ProcessStartInfo(parsed.AbsoluteUri) { UseShellExecute = true }); }
+        catch (Exception ex) { Log.Error("open link", ex); }
     }
 
     /// <summary>Open the workflow's agent in its own project with its instructions already submitted.</summary>

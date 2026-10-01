@@ -11,7 +11,10 @@ public sealed class Project
     public string Icon { get; set; } = "";
 }
 
-/// <summary>Projects persisted to %APPDATA%\AgentDeck\projects.json. Thread-safe reads via Snapshot().</summary>
+/// <summary>
+/// Projects persisted to %APPDATA%\AgentDeck\projects.json, most recently selected first (the sidebar and the
+/// Stream Deck follow this order). Thread-safe reads via Snapshot().
+/// </summary>
 sealed class ProjectStore
 {
     public static readonly string[] Palette =
@@ -35,9 +38,9 @@ sealed class ProjectStore
         try { _data = File.Exists(FilePath) ? JsonSerializer.Deserialize<Data>(File.ReadAllText(FilePath)) ?? new() : new(); }
         catch (Exception ex) { Log.Error("load projects", ex); _data = new(); }
         _data.SelectedId ??= _data.Projects.FirstOrDefault()?.Id;
+        bool migrated = MoveToFront(_data.SelectedId); // lists saved before most-recent-first ordering
 
         // Give projects from before icons existed their own icon.
-        bool migrated = false;
         foreach (var p in _data.Projects.Where(p => !IconLibrary.Exists(p.Icon)))
         {
             p.Icon = IconLibrary.UniqueDefault(_data.Projects.Select(x => x.Icon));
@@ -58,7 +61,7 @@ sealed class ProjectStore
     public Project Add(string name, string path, string color, string icon)
     {
         var project = new Project { Name = name, Path = path, Color = color, Icon = icon };
-        lock (_gate) { _data.Projects.Add(project); _data.SelectedId = project.Id; }
+        lock (_gate) { _data.Projects.Insert(0, project); _data.SelectedId = project.Id; }
         Save();
         return project;
     }
@@ -89,26 +92,26 @@ sealed class ProjectStore
         Save();
     }
 
-    public void Move(string id, int newIndex)
-    {
-        lock (_gate)
-        {
-            var p = _data.Projects.Find(x => x.Id == id);
-            if (p == null) return;
-            _data.Projects.Remove(p);
-            _data.Projects.Insert(Math.Clamp(newIndex, 0, _data.Projects.Count), p);
-        }
-        Save();
-    }
-
     public bool Select(string id)
     {
         lock (_gate)
         {
             if (_data.SelectedId == id || _data.Projects.All(p => p.Id != id)) return false;
             _data.SelectedId = id;
+            MoveToFront(id);
         }
         Save();
+        return true;
+    }
+
+    /// <summary>Move a project to the top of the list; true if it moved. Call under _gate (or before sharing).</summary>
+    bool MoveToFront(string? id)
+    {
+        int index = _data.Projects.FindIndex(p => p.Id == id);
+        if (index <= 0) return false;
+        var project = _data.Projects[index];
+        _data.Projects.RemoveAt(index);
+        _data.Projects.Insert(0, project);
         return true;
     }
 

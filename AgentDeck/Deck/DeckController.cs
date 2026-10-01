@@ -265,7 +265,8 @@ sealed class DeckController : IDisposable
         if (projects.Length <= ProjectKeys.Length) column = projects;
         else
         {
-            // Two projects plus "more": the first project, then the selected one (or the second).
+            // Two projects plus "more". Projects are most recent first, so normally that's the current project and
+            // the previous one; the selected project is always shown, whatever the order.
             int selectedIndex = Array.FindIndex(projects, p => p.Id == selectedId);
             column = [projects[0], selectedIndex >= 1 ? projects[selectedIndex] : projects[1]];
             var hidden = projects.Except(column).Take(4).Select(p => p.Color).ToArray();

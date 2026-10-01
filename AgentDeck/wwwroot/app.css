@@ -97,7 +97,6 @@ button { font: inherit; color: inherit; }
   border-radius: 2px;
   background: var(--c);
 }
-.project.drop-before { box-shadow: inset 0 2px 0 var(--c); }
 .project .swatch { width: 10px; height: 10px; border-radius: 3px; background: var(--c); flex: none; }
 .project .meta { min-width: 0; flex: 1; }
 .project .name, .project .path { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

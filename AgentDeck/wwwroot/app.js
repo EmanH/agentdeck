@@ -74,6 +74,8 @@ function createPane(sid, projectId, agent) {
     scrollback: 20000,
     allowProposedApi: true,
     theme: THEME,
+    // OSC 8 hyperlinks (agents print these): default browser, like plain URLs, not a WebView popup.
+    linkHandler: { activate: (_, uri) => send({ t: 'openUrl', uri }) },
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);
@@ -418,7 +420,7 @@ function render() {
 
 function renderSidebar() {
   const nav = $('#projects');
-  nav.replaceChildren(...state.projects.map((p, index) => {
+  nav.replaceChildren(...state.projects.map(p => {
     const projectSessions = [...state.sessions.values()].filter(s => s.projectId === p.id);
     const count = projectSessions.length;
     const done = p.id !== state.selected && projectSessions.some(s => s.done);
@@ -426,7 +428,6 @@ function renderSidebar() {
     item.className = 'project' + (p.id === state.selected ? ' selected' : '')
       + (projectSessions.some(s => working.has(s.id)) ? ' working' : '');
     item.style.setProperty('--c', p.color);
-    item.draggable = true;
     item.title = p.path;
     item.innerHTML = `${p.icon && iconUrl(p.icon) ? `<span class="tile">${iconImg(p.icon, 18)}</span>` : '<span class="swatch"></span>'}
       <div class="meta"><div class="name">${escapeHtml(p.name)}</div>${state.branches[p.id]
@@ -436,18 +437,6 @@ function renderSidebar() {
       ${count ? `<span class="count">${count}</span>` : ''}`;
     item.addEventListener('click', () => selectProject(p.id));
     item.addEventListener('contextmenu', e => { e.preventDefault(); projectMenu(p, e.clientX, e.clientY); });
-    item.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', p.id));
-    item.addEventListener('dragover', e => { e.preventDefault(); item.classList.add('drop-before'); });
-    item.addEventListener('dragleave', () => item.classList.remove('drop-before'));
-    item.addEventListener('drop', e => {
-      e.preventDefault();
-      item.classList.remove('drop-before');
-      const id = e.dataTransfer.getData('text/plain');
-      if (id && id !== p.id) {
-        const from = state.projects.findIndex(x => x.id === id);
-        send({ t: 'moveProject', id, index: from < index ? index - 1 : index });
-      }
-    });
     return item;
   }));
 }
@@ -569,6 +558,9 @@ function renderEmpty(project, visible) {
 function selectProject(id) {
   if (state.selected === id) return;
   state.selected = id;
+  // Most recently selected first: move it to the top now rather than waiting for the host's state.
+  const index = state.projects.findIndex(p => p.id === id);
+  if (index > 0) state.projects.unshift(...state.projects.splice(index, 1));
   send({ t: 'selectProject', id });
   render();
   focusActive();
