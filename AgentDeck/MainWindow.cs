@@ -36,6 +36,7 @@ sealed class MainWindow : Window, IDeckActions
     readonly DeckController _deck;
     readonly TrayIcon _tray;
     readonly ModifierHotkey _hotkey;
+    readonly ControlServer? _controlServer;
     readonly ConcurrentDictionary<string, int> _activeSession = new();
     readonly Dictionary<int, StringBuilder> _pendingOutput = [];
     readonly List<string> _outbox = [];
@@ -81,6 +82,15 @@ sealed class MainWindow : Window, IDeckActions
         _deck = new DeckController(_projects, _sessions, _dictation, _transcripts, _workflows, this);
         _hotkey = new ModifierHotkey(() => Dispatcher.BeginInvoke(_dictation.Toggle));
         _tray = new TrayIcon(ShowFromTray, Quit);
+
+        try
+        {
+            _controlServer = new ControlServer(_projects, _sessions, _workflows, this, Dispatcher, () => _branches);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Control server failed to start", ex);
+        }
 
         FirstRunSetup();
 
@@ -153,6 +163,7 @@ sealed class MainWindow : Window, IDeckActions
         _flushTimer.Stop();
         _hotkey.Dispose();
         _deck.Dispose();
+        _controlServer?.Dispose();
         _sessions.CloseAll();
         _tray.Dispose();
         Close();

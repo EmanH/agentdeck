@@ -102,6 +102,67 @@ Agent CLIs on `PATH`: `claude`, `codex`, `grok`.
 | `Alt+Shift+=` · `Alt+Shift+-` · `Alt+Arrow` | Split right · split down · move focus |
 | `Ctrl+Tab` · `Ctrl+=/-/0` | Next tab · font size |
 
+## HTTP Control API
+
+AgentDeck exposes a localhost HTTP API on **`http://127.0.0.1:17832`** for external orchestration (desktop assistants, automation scripts, custom control surfaces). All responses are JSON with camelCase keys.
+
+**Optional authentication:** set `AGENTDECK_API_TOKEN` to require `Authorization: Bearer <token>` on all requests.
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Returns `{ "status": "ok", "version": "1.1.0" }` |
+| `GET` | `/state` | Projects, selected project, sessions (id/projectId/agent/label/done/working/busy), branches |
+| `GET` | `/workflows` | All workflows with their settings |
+| `POST` | `/projects/select` | Body: `{ "id": "<projectId>" }` — select a project |
+| `POST` | `/sessions/new` | Body: `{ "agent": "claude", "projectId"?: "<id>", "prompt"?: "...", "model"?: "...", "effort"?: "...", "name"?: "..." }` — create session |
+| `POST` | `/sessions/<id>/activate` | Bring session to front |
+| `POST` | `/sessions/<id>/close` | Close session |
+| `POST` | `/sessions/<id>/input` | Body: `{ "data": "..." }` — send raw terminal input |
+| `POST` | `/sessions/<id>/paste` | Body: `{ "text": "...", "submit"?: true }` — paste text, optionally submit with Enter |
+| `POST` | `/sessions/<id>/enter` | Send Enter to session |
+| `POST` | `/workflows/<id>/run` | Run workflow (opens agent with prompt) |
+| `POST` | `/launch` | Body: `{ "agent": "claude" }` — launch agent and start dictation |
+| `POST` | `/dictation/toggle` | Toggle dictation on/off |
+| `POST` | `/window/show` | Show AgentDeck window from tray |
+
+### Examples
+
+```powershell
+# Health check
+curl http://127.0.0.1:17832/health
+
+# Get current state (projects, sessions, branches)
+curl http://127.0.0.1:17832/state
+
+# Select a project
+curl -X POST http://127.0.0.1:17832/projects/select `
+  -H "Content-Type: application/json" `
+  -d '{"id":"a1b2c3d4"}'
+
+# Create a new Claude session with a prompt
+curl -X POST http://127.0.0.1:17832/sessions/new `
+  -H "Content-Type: application/json" `
+  -d '{"agent":"claude","prompt":"Fix the login bug"}'
+
+# Activate session 5
+curl -X POST http://127.0.0.1:17832/sessions/5/activate
+
+# Paste text into session 5
+curl -X POST http://127.0.0.1:17832/sessions/5/paste `
+  -H "Content-Type: application/json" `
+  -d '{"text":"npm test","submit":true}'
+
+# Toggle dictation
+curl -X POST http://127.0.0.1:17832/dictation/toggle
+
+# With authentication
+curl -H "Authorization: Bearer <token>" http://127.0.0.1:17832/state
+```
+
+**Port binding:** If port 17832 is already in use, AgentDeck logs the error and continues without the control API.
+
 ## Privacy
 
 Audio goes to Soniox only while the mic is on. Transcripts, and for untitled sessions your last few typed lines, go to OpenAI if `OPENAI_API_KEY` is set. To title and icon a terminal, the last 80 lines of its screen go to OpenAI and TypeSafe (whichever keys are set) every 30 s while it's changing. Transcripts are stored locally (`%APPDATA%\AgentDeck`); logs contain timings and session titles, never transcript or terminal text.
