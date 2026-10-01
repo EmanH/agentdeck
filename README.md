@@ -89,8 +89,39 @@ No SDK? Download `AgentDeck-*-win-x64.zip` from [Releases](https://github.com/Em
 | `SONIOX_API_KEY` | Dictation (required for dictation) |
 | `OPENAI_API_KEY` | Transcript cleanup and session titles (optional) |
 | `TYPESAFE_AI_API_KEY` | Session icons on the Stream Deck (optional) |
+| `AGENTDECK_API_TOKEN` | Optional Bearer token for the localhost control API |
+| `AGENTDECK_API_PORT` | Control API port (default `17832`) |
 
 Agent CLIs on `PATH`: `claude`, `codex`, `grok`.
+
+
+## Local control API
+
+AgentDeck exposes a localhost-only HTTP JSON API (default `http://127.0.0.1:17832`) so an external assistant can monitor and orchestrate the same actions as the UI and Stream Deck. Binds on startup; if the port is taken it logs and continues without the API. Optional auth: set `AGENTDECK_API_TOKEN` and send `Authorization: Bearer <token>`. Override the port with `AGENTDECK_API_PORT`.
+
+| Method | Path | Body |
+|---|---|---|
+| GET | `/health` | |
+| GET | `/state` | projects, selected, sessions (id/projectId/agent/label/done/working/busy/active), branches |
+| GET | `/workflows` | |
+| POST | `/projects/select` | `{ "id" }` |
+| POST | `/sessions/new` | `{ "projectId?", "agent", "prompt?", "model?", "effort?", "name?" }` |
+| POST | `/sessions/{id}/activate` | |
+| POST | `/sessions/{id}/close` | |
+| POST | `/sessions/{id}/input` | `{ "data" }` raw PTY write |
+| POST | `/sessions/{id}/paste` | `{ "text", "submit?" }` |
+| POST | `/sessions/{id}/enter` | |
+| POST | `/workflows/{id}/run` | |
+| POST | `/launch` | `{ "agent" }` (opens agent + starts dictation, like the deck) |
+| POST | `/dictation/toggle` | |
+| POST | `/window/show` | |
+
+```powershell
+curl.exe http://127.0.0.1:17832/health
+curl.exe http://127.0.0.1:17832/state
+curl.exe -X POST http://127.0.0.1:17832/launch -H "Content-Type: application/json" -d "{\"agent\":\"claude\"}"
+curl.exe -X POST http://127.0.0.1:17832/workflows/WORKFLOW_ID/run
+```
 
 ## Shortcuts
 

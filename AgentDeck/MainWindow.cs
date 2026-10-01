@@ -19,7 +19,7 @@ namespace AgentDeck;
 /// that UI and the terminals, plus the Stream Deck, dictation, global shortcut and tray icon.
 /// Closing the window hides it to the tray; everything keeps running until Quit.
 /// </summary>
-sealed class MainWindow : Window, IDeckActions
+sealed class MainWindow : Window, IDeckActions, IControlActions
 {
     const int ChromeRgb = 0x161616;
     static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -36,6 +36,7 @@ sealed class MainWindow : Window, IDeckActions
     readonly DeckController _deck;
     readonly TrayIcon _tray;
     readonly ModifierHotkey _hotkey;
+    readonly ControlServer _control;
     readonly ConcurrentDictionary<string, int> _activeSession = new();
     readonly Dictionary<int, StringBuilder> _pendingOutput = [];
     readonly List<string> _outbox = [];
@@ -106,6 +107,9 @@ sealed class MainWindow : Window, IDeckActions
             WindowState = WindowState.Minimized;
         }
         Show();
+
+        _control = new ControlServer(Dispatcher, this);
+        _control.Start();
     }
 
     static void FirstRunSetup()
@@ -151,6 +155,7 @@ sealed class MainWindow : Window, IDeckActions
         _quitting = true;
         Log.Info("Quitting");
         _flushTimer.Stop();
+        _control.Dispose();
         _hotkey.Dispose();
         _deck.Dispose();
         _sessions.CloseAll();
@@ -590,4 +595,113 @@ sealed class MainWindow : Window, IDeckActions
     }
     public void ToggleDictation() => _dictation.Toggle();
     public int? ActiveSessionId(string projectId) => _activeSession.TryGetValue(projectId, out var id) ? id : null;
+
+    // --- IControlActions (HTTP control API; already on the UI thread) ------------
+
+    object IControlActions.GetState()
+    {
+        var sessions = _sessions.Snapshot().OrderBy(s => s.Id).Select(s => new
+        {
+            s.Id,
+            s.ProjectId,
+            agent = s.Agent.ToString().ToLowerInvariant(),
+            s.Label,
+            s.Done,
+            s.Working,
+            s.Busy,
+            active = ActiveSessionId(s.ProjectId) == s.Id,
+        });
+        return new
+        {
+            projects = _projects.Snapshot().Select(p => new
+            {
+                p.Id, p.Name, p.Path, p.Color, p.Icon,
+                branch = _branches.TryGetValue(p.Id, out var b) ? b : null,
+            }),
+            selected = _projects.SelectedId,
+            sessions,
+            branches = _branches,
+        };
+    }
+
+    object[] IControlActions.GetWorkflows() =>
+        _workflows.Snapshot().Select(w => (object)new
+        {
+            w.Id, w.ProjectId, w.Name, agent = w.Agent.ToString().ToLowerInvariant(),
+            w.Instructions, w.Color, w.Icon, w.Model, w.Effort,
+        }).ToArray();
+
+    bool IControlActions.SelectProject(string id)
+    {
+        if (!_projects.Select(id)) return false;
+        PushState();
+        return true;
+    }
+
+    Session? IControlActions.NewSession(string? projectId, AgentKind agent, string? prompt, string? model, string? effort, string? name)
+    {
+        var session = StartSession(projectId, agent, "tab", null, name, prompt, model, effort);
+        if (session != null)
+        {
+            Post(new { t = "activate", id = session.Id });
+            ShowFromTray();
+        }
+        return session;
+    }
+
+    bool IControlActions.ActivateSession(int id)
+    {
+        var session = _sessions.Get(id);
+        if (session == null) return false;
+        _projects.Select(session.ProjectId);
+        _activeSession[session.ProjectId] = session.Id;
+        _sessions.MarkSeen(session.Id);
+        PushState();
+        Post(new { t = "activate", id = session.Id });
+        ShowFromTray();
+        return true;
+    }
+
+    bool IControlActions.CloseSession(int id)
+    {
+        if (_sessions.Get(id) == null) return false;
+        _sessions.Close(id);
+        return true;
+    }
+
+    bool IControlActions.WriteInput(int id, string data)
+    {
+        if (_sessions.Get(id) == null) return false;
+        _sessions.Write(id, data);
+        return true;
+    }
+
+    bool IControlActions.Paste(int id, string text, bool submit)
+    {
+        if (_sessions.Get(id) == null) return false;
+        // Same path as dictation: xterm bracketed paste, optional Enter.
+        Post(new { t = "pasteInto", id, text, submit });
+        return true;
+    }
+
+    bool IControlActions.RunWorkflow(string id)
+    {
+        if (_workflows.Get(id) == null) return false;
+        RunWorkflowNow(id);
+        return true;
+    }
+
+    Session? IControlActions.Launch(AgentKind agent)
+    {
+        var session = StartSession(null, agent, "tab", null);
+        if (session == null) return null;
+        Post(new { t = "activate", id = session.Id });
+        ShowFromTray();
+        _dictation.StartFor(session.Id);
+        return session;
+    }
+
+    void IControlActions.ToggleDictation() => _dictation.Toggle();
+    void IControlActions.ShowWindow() => ShowFromTray();
+
 }
