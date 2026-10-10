@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 
 namespace AgentDeck.Core;
@@ -27,7 +28,7 @@ static class PastedImages
         else if (Retry(Clipboard.ContainsImage) && Retry(Clipboard.GetImage) is { } image)
         {
             var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(image));
+            encoder.Frames.Add(BitmapFrame.Create(DropEmptyAlpha(image)));
             using var buffer = new MemoryStream();
             encoder.Save(buffer);
             png = buffer.ToArray();
@@ -39,6 +40,21 @@ static class PastedImages
         File.WriteAllBytes(path, png);
         Log.Info($"Pasted image saved ({png.Length / 1024} KB)");
         return [path];
+    }
+
+    /// <summary>
+    /// Screenshots (Snipping Tool, PrtScn) arrive as a 32-bit bitmap whose alpha bytes are all zero, which WPF reads
+    /// as fully transparent: a black or blank PNG. If nothing is visible, ignore the alpha channel.
+    /// </summary>
+    static BitmapSource DropEmptyAlpha(BitmapSource image)
+    {
+        if (image.Format != PixelFormats.Bgra32 && image.Format != PixelFormats.Pbgra32) return image;
+        int stride = image.PixelWidth * 4;
+        var pixels = new byte[stride * image.PixelHeight];
+        image.CopyPixels(pixels, stride, 0);
+        for (int i = 3; i < pixels.Length; i += 4)
+            if (pixels[i] != 0) return image; // real transparency; keep it
+        return BitmapSource.Create(image.PixelWidth, image.PixelHeight, image.DpiX, image.DpiY, PixelFormats.Bgr32, null, pixels, stride);
     }
 
     public static void DeleteAll()
