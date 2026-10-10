@@ -1,5 +1,6 @@
 using AgentDeck.Core;
 using AgentDeck.Dictation;
+using AgentDeck.Native;
 using OpenMacroBoard.SDK;
 using SkiaSharp;
 
@@ -25,7 +26,8 @@ interface IDeckActions
 /// Keeps the Stream Deck in sync with the app at ~30 fps, redrawing only keys whose content changed.
 /// Normal layout (5x3): left column = projects (bottom-left becomes "more" past three), keys 14/15 =
 /// Enter/Mic, the rest = the selected project's terminals then "+ agent" launchers. "More" opens a
-/// temporary project picker across the deck with a back key.
+/// temporary project picker across the deck with a back key. Key 12 (or Paste again, briefly after a transcript)
+/// opens the editor tools: every key becomes a drawing-app shortcut until its Back key is pressed.
 /// </summary>
 sealed class DeckController : IDisposable
 {
@@ -36,6 +38,15 @@ sealed class DeckController : IDisposable
     const int RepasteMs = 10_000; // "paste again" shows this long after a transcript (or its last press)
     const int HoldMs = 800, HoldVisibleAfterMs = 150, PickerTimeoutMs = 10_000;
     static readonly AgentKind[] LaunchAgents = [AgentKind.Claude, AgentKind.Codex, AgentKind.Grok];
+    const int EditorFlashMs = 280;
+
+    /// <summary>Editor mode: each key presses its shortcut in whatever app has focus, auto-repeating while held. A 3x3 block on the left for a left thumb; Back completes it bottom-right.</summary>
+    static readonly (int Key, KeyArt.EditorTool Tool)[] EditorKeys =
+    [
+        (0, KeyArt.EditorTool.Image), (1, KeyArt.EditorTool.Connect), (2, KeyArt.EditorTool.Metadata),
+        (5, KeyArt.EditorTool.Ungroup), (6, KeyArt.EditorTool.Select), (7, KeyArt.EditorTool.Undo),
+        (10, KeyArt.EditorTool.Erase), (11, KeyArt.EditorTool.Box),
+    ];
 
     readonly ProjectStore _projects;
     readonly SessionManager _sessions;
@@ -56,6 +67,9 @@ sealed class DeckController : IDisposable
     readonly object _keyGate = new();
     readonly long[] _downAt = Enumerable.Repeat(-1L, KeyCount).ToArray();
     readonly KeyView?[] _heldView = new KeyView?[KeyCount];
+    // Keys down whose view repeats or wants the release, and when each repeats next.
+    readonly KeyView?[] _pressedView = new KeyView?[KeyCount];
+    readonly long[] _nextRepeat = new long[KeyCount];
     readonly (bool down, long at)?[] _lastEvent = new (bool, long)?[KeyCount];
     Action? _unsubscribe; // detaches our key handler from the current board
 
@@ -64,9 +78,17 @@ sealed class DeckController : IDisposable
     int _pickerPage, _workflowPage;
     long _pickerTouched;
 
+    // Editor mode stays until Back; no idle timeout.
+    volatile bool _editorOpen;
+    readonly long[] _editorPressedAt = new long[KeyCount];
+    volatile int _editorLastKey = -1; // gets the gold highlight
+
     /// <param name="Press">Fires immediately on key-down.</param>
     /// <param name="Hold">Extra long-press action, fired if the key is still down after <see cref="HoldMs"/>.</param>
-    readonly record struct KeyView(string Signature, Action<SKCanvas> Draw, Action? Press = null, Action? Hold = null);
+    /// <param name="Repeat">Fired over and over while the key is held, like keyboard auto-repeat.</param>
+    /// <param name="Release">Fired on key-up.</param>
+    readonly record struct KeyView(string Signature, Action<SKCanvas> Draw, Action? Press = null, Action? Hold = null,
+                                   Action? Repeat = null, Action? Release = null);
 
     public DeckController(ProjectStore projects, SessionManager sessions, DictationService dictation,
                           TranscriptStore transcripts, WorkflowStore workflows, IDeckActions actions)
@@ -165,11 +187,18 @@ sealed class DeckController : IDisposable
                 if (key == EnterKey) _enterPressedAt = now;
                 fire = view.Press;
                 if (view.Hold != null) { _downAt[key] = now; _heldView[key] = view; }
+                if (view.Repeat != null || view.Release != null)
+                {
+                    _pressedView[key] = view;
+                    _nextRepeat[key] = now + RepeatDelayMs();
+                }
             }
             else
             {
                 _downAt[key] = -1; // released before the hold fired
                 _heldView[key] = null;
+                fire = _pressedView[key]?.Release; // the view that was pressed, even if the layout changed since
+                _pressedView[key] = null;
             }
         }
         if (down) Log.Info($"Deck key {key + 1}: {views[key].Signature.Split('|')[0]}");
@@ -187,6 +216,31 @@ sealed class DeckController : IDisposable
                 if (_heldView[k]?.Hold is { } hold) fire.Add(hold);
                 _downAt[k] = -1; // the release that follows is ignored
                 _heldView[k] = null;
+            }
+            for (int k = 0; k < KeyCount; k++)
+            {
+                if (_pressedView[k]?.Repeat is not { } repeat || now < _nextRepeat[k]) continue;
+                fire.Add(repeat);
+                _nextRepeat[k] = now + RepeatIntervalMs();
+            }
+        }
+        foreach (var action in fire) action();
+    }
+
+    // Auto-repeat follows the Windows keyboard settings (delay 0..3 = 250..1000 ms; speed 0..31 = ~2.5..30 per second).
+    static int RepeatDelayMs() => (System.Windows.Forms.SystemInformation.KeyboardDelay + 1) * 250;
+    static int RepeatIntervalMs() => (int)(1000 / (2.5f + System.Windows.Forms.SystemInformation.KeyboardSpeed * 27.5f / 31));
+
+    /// <summary>Release every key still down (the deck went away mid-press), so no synthetic key stays stuck.</summary>
+    void ReleaseAll()
+    {
+        var fire = new List<Action>();
+        lock (_keyGate)
+        {
+            for (int k = 0; k < KeyCount; k++)
+            {
+                if (_pressedView[k]?.Release is { } release) fire.Add(release);
+                _pressedView[k] = null;
             }
         }
         foreach (var action in fire) action();
@@ -213,6 +267,11 @@ sealed class DeckController : IDisposable
         var projects = _projects.Snapshot();
         var selectedId = _projects.SelectedId;
 
+        if (_editorOpen)
+        {
+            BuildEditor(views, now);
+            return views;
+        }
         if (_pickerOpen && projects.Length > ProjectKeys.Length) BuildPicker(views, projects, selectedId);
         else
         {
@@ -312,14 +371,45 @@ sealed class DeckController : IDisposable
     void BuildRepaste(KeyView[] views, long now)
     {
         long since = Math.Max(_transcripts.LastAddedTicks, _repastePressedAt);
-        if (since == 0 || _transcripts.Latest == null) return;
-        float remaining = 1 - (now - since) / (float)RepasteMs;
-        if (remaining <= 0) return;
+        float remaining = since == 0 || _transcripts.Latest == null ? 0 : 1 - (now - since) / (float)RepasteMs;
+        if (remaining <= 0)
+        {
+            views[RepasteKey] = new KeyView("editor", KeyArt.EditorButton, () => _editorOpen = true);
+            return;
+        }
         views[RepasteKey] = new KeyView($"repaste|{(int)(remaining * 60)}", c => KeyArt.Repaste(c, remaining), () =>
         {
             _repastePressedAt = Environment.TickCount64; // each press restarts the countdown
             _actions.PasteLastTranscript();
         });
+    }
+
+    void BuildEditor(KeyView[] views, long now)
+    {
+        foreach (var (key, tool) in EditorKeys)
+        {
+            // Lit while held, fading out after release.
+            float flash = _pressedView[key] != null ? 1
+                : _editorPressedAt[key] == 0 ? 0 : Math.Max(0, 1 - (now - _editorPressedAt[key]) / (float)EditorFlashMs);
+            int k = key;
+            // Like a real keyboard: key-down on press, repeated key-downs while held, key-up on release.
+            byte vk = (byte)KeyArt.EditorShortcut(tool);
+            byte[] modifiers = tool == KeyArt.EditorTool.Undo ? [Input.VK_CONTROL] : [];
+            bool last = key == _editorLastKey;
+            views[key] = new KeyView($"ed|{tool}|{(int)(flash * 20)}|{last}", c => KeyArt.Editor(c, tool, flash, last),
+                Press: () =>
+                {
+                    _editorLastKey = k;
+                    Input.Down(vk, modifiers);
+                },
+                Repeat: () => Input.Down(vk),
+                Release: () =>
+                {
+                    _editorPressedAt[k] = Environment.TickCount64;
+                    Input.Up(vk, modifiers);
+                });
+        }
+        views[WorkflowsKey] = new KeyView("ed-back", KeyArt.Back, () => _editorOpen = false);
     }
 
     void BuildPicker(KeyView[] views, Project[] projects, string? selectedId)
@@ -393,6 +483,7 @@ sealed class DeckController : IDisposable
 
     void DisposeBoard()
     {
+        ReleaseAll();
         try { _unsubscribe?.Invoke(); } catch (Exception) { }
         _unsubscribe = null;
         try { _board?.Dispose(); } catch (Exception) { }

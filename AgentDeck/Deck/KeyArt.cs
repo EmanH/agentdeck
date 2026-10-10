@@ -56,6 +56,9 @@ static class KeyArt
             c => Project(c, new Project { Name = "Website", Color = "#22c55e", Icon = "globe-showing-americas" }, false, 2),
             NewWorkflow,
             c => Mic(c, DictationState.Idle, 0, 0),
+            EditorButton,
+            .. Enum.GetValues<EditorTool>().Select(t => (Action<SKCanvas>)(c => Editor(c, t))),
+            c => Editor(c, EditorTool.Box, 0.8f),
         ];
         using var sheet = new SKBitmap(keys.Length * 80, 80);
         using (var canvas = new SKCanvas(sheet))
@@ -433,6 +436,271 @@ static class KeyArt
         canvas.DrawLine(36, 17, 36, 35, plus);
         canvas.DrawLine(27, 26, 45, 26, plus);
         DrawFittedText(canvas, "New workflow", new SKRect(6, 42, 66, 64), 11, 9, 2, new SKColor(170, 170, 170), Semibold);
+    }
+
+    // --- editor tools -------------------------------------------------------------
+
+    public enum EditorTool { Select, Connect, Box, Erase, Ungroup, Metadata, Image, Undo }
+
+    static readonly Dictionary<EditorTool, (char Letter, string Label, SKColor Color)> EditorStyles = new()
+    {
+        [EditorTool.Select] = ('V', "Select", new SKColor(59, 130, 246)),
+        [EditorTool.Connect] = ('F', "Connect", new SKColor(168, 85, 247)),
+        [EditorTool.Box] = ('B', "Box", new SKColor(34, 197, 94)),
+        [EditorTool.Erase] = ('X', "Erase", new SKColor(239, 68, 68)),
+        [EditorTool.Ungroup] = ('G', "Ungroup", new SKColor(245, 158, 11)),
+        [EditorTool.Metadata] = ('M', "Meta", new SKColor(236, 72, 153)),
+        [EditorTool.Image] = ('I', "Image", new SKColor(6, 182, 212)),
+        [EditorTool.Undo] = ('Z', "Undo", new SKColor(148, 163, 184)),
+    };
+
+    /// <summary>The letter key the tool taps (Undo sends it with Ctrl).</summary>
+    public static char EditorShortcut(EditorTool tool) => EditorStyles[tool].Letter;
+
+    static SKColor Mix(SKColor a, SKColor b, float t) => new(
+        (byte)(a.Red + (b.Red - a.Red) * t), (byte)(a.Green + (b.Green - a.Green) * t), (byte)(a.Blue + (b.Blue - a.Blue) * t));
+
+    static void DrawPath(SKCanvas canvas, SKPathBuilder builder, SKPaint paint)
+    {
+        using var path = builder.Detach();
+        canvas.DrawPath(path, paint);
+    }
+
+    /// <summary>Entry to editor mode: a golden pencil mid-stroke.</summary>
+    public static void EditorButton(SKCanvas canvas)
+    {
+        var gold = new SKColor(251, 191, 36);
+        using var trail = Stroke(gold.WithAlpha(150), 2);
+        using var squiggle = new SKPathBuilder();
+        squiggle.MoveTo(13, 40); squiggle.CubicTo(17, 33, 21, 44, 26, 37);
+        DrawPath(canvas, squiggle, trail);
+        Pencil(canvas, 27, 37, 24, gold);
+        DrawFittedText(canvas, "Editor", new SKRect(5, 44, 67, 60), 12, 9, 1, new SKColor(215, 215, 215), Semibold);
+    }
+
+    /// <summary>A pencil with its tip at (x, y), pointing down-left at 45°.</summary>
+    static void Pencil(SKCanvas canvas, float x, float y, float length, SKColor body)
+    {
+        const float w = 7;
+        canvas.Save();
+        canvas.Translate(x, y);
+        canvas.RotateDegrees(-45);
+        using var wood = Fill(new SKColor(245, 222, 179));
+        using var tip = new SKPathBuilder();
+        tip.MoveTo(0, 0); tip.LineTo(8, -w / 2); tip.LineTo(8, w / 2); tip.Close();
+        DrawPath(canvas, tip, wood);
+        using var lead = Fill(new SKColor(40, 40, 40));
+        canvas.DrawCircle(1.6f, 0, 1.4f, lead);
+        using var shaft = Fill(body);
+        canvas.DrawRect(new SKRect(8, -w / 2, 8 + length, w / 2), shaft);
+        using var shine = Fill(SKColors.White.WithAlpha(80));
+        canvas.DrawRect(new SKRect(8, -w / 2, 8 + length, -w / 2 + 2), shine);
+        using var band = Fill(new SKColor(200, 200, 210));
+        canvas.DrawRect(new SKRect(8 + length, -w / 2, 11 + length, w / 2), band);
+        using var eraser = Fill(new SKColor(244, 114, 182));
+        canvas.DrawRoundRect(new SKRect(11 + length, -w / 2, 15 + length, w / 2), 1.5f, 1.5f, eraser);
+        canvas.Restore();
+    }
+
+    /// <summary>
+    /// An editor tool key: jewel-toned tile with a glass sheen, the tool's glyph, and a keycap with its shortcut.
+    /// <paramref name="flash"/> (0..1) lights the tile up briefly after a press; <paramref name="last"/> marks the
+    /// last key pressed with a gold rim, inner glow and gold keycap.
+    /// </summary>
+    public static void Editor(SKCanvas canvas, EditorTool tool, float flash = 0, bool last = false)
+    {
+        var (letter, label, color) = EditorStyles[tool];
+        var tile = new SKRect(2.5f, 2.5f, 69.5f, 69.5f);
+        var top = Mix(SKColors.Black, color, 0.55f + 0.35f * flash);
+        var bottom = Mix(SKColors.Black, color, 0.14f + 0.3f * flash);
+        using (var bg = new SKPaint { IsAntialias = true, Shader = SKShader.CreateLinearGradient(
+                   new SKPoint(0, 2), new SKPoint(0, 70), [top, bottom], SKShaderTileMode.Clamp) })
+            canvas.DrawRoundRect(tile, 12, 12, bg);
+
+        // Soft halo behind the glyph, then a glass sheen across the top.
+        using (var halo = new SKPaint { IsAntialias = true, Shader = SKShader.CreateRadialGradient(
+                   new SKPoint(36, 25), 26, [color.WithAlpha((byte)(110 + 100 * flash)), color.WithAlpha(0)], SKShaderTileMode.Clamp) })
+            canvas.DrawCircle(36, 25, 26, halo);
+        canvas.Save();
+        canvas.ClipRoundRect(new SKRoundRect(tile, 12), antialias: true);
+        using (var sheen = new SKPaint { IsAntialias = true, Shader = SKShader.CreateLinearGradient(
+                   new SKPoint(0, 2), new SKPoint(0, 30), [SKColors.White.WithAlpha(46), SKColors.White.WithAlpha(0)], SKShaderTileMode.Clamp) })
+            canvas.DrawOval(new SKRect(-12, -22, 84, 30), sheen);
+        canvas.Restore();
+        if (last) GoldRim(canvas, tile);
+        else
+        {
+            using var rim = Stroke(Mix(color, SKColors.White, 0.35f + 0.5f * flash).WithAlpha(220), 1.4f);
+            canvas.DrawRoundRect(new SKRect(3.2f, 3.2f, 68.8f, 68.8f), 11.3f, 11.3f, rim);
+        }
+
+        EditorGlyph(canvas, tool, color);
+
+        // Bottom row: a keycap with the shortcut, then the tool's name.
+        var cap = new SKRect(8, 47, 25, 64);
+        using (var capShadow = Fill(SKColors.Black.WithAlpha(110)))
+            canvas.DrawRoundRect(new SKRect(cap.Left, cap.Top + 1.5f, cap.Right, cap.Bottom + 1.5f), 4.5f, 4.5f, capShadow);
+        using (var capFill = last
+                   ? new SKPaint { IsAntialias = true, Shader = SKShader.CreateLinearGradient(new SKPoint(0, cap.Top), new SKPoint(0, cap.Bottom),
+                         [new SKColor(255, 236, 150), new SKColor(232, 172, 30)], SKShaderTileMode.Clamp) }
+                   : Fill(new SKColor(250, 250, 252)))
+            canvas.DrawRoundRect(cap, 4.5f, 4.5f, capFill);
+        var keyText = tool == EditorTool.Undo ? "^Z" : letter.ToString();
+        using (var font = new SKFont(Bold, keyText.Length > 1 ? 10 : 13) { Edging = SKFontEdging.Antialias })
+        using (var ink = Fill(Mix(SKColors.Black, color, 0.45f)))
+            canvas.DrawText(keyText, cap.MidX, cap.MidY + font.Size * 0.36f, SKTextAlign.Center, font, ink);
+        DrawFittedText(canvas, label, new SKRect(28, 47, 66, 64), 12.5f, 8.5f, 1, SKColors.White, Semibold);
+    }
+
+    static readonly SKColor[] GoldStops =
+        [new(184, 134, 11), new(255, 229, 138), new(245, 183, 0), new(255, 246, 196), new(212, 160, 23), new(184, 134, 11)];
+
+    /// <summary>The last-pressed highlight: a warm glow inside the tile and a shimmering gold rim.</summary>
+    static void GoldRim(SKCanvas canvas, SKRect tile)
+    {
+        canvas.Save();
+        canvas.ClipRoundRect(new SKRoundRect(tile, 12), antialias: true);
+        using (var glow = Stroke(new SKColor(255, 200, 60, 170), 9))
+        {
+            glow.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, 4);
+            canvas.DrawRoundRect(tile, 12, 12, glow);
+        }
+        canvas.Restore();
+        using var rim = Stroke(SKColors.White, 3);
+        rim.Shader = SKShader.CreateSweepGradient(new SKPoint(36, 36), GoldStops);
+        canvas.DrawRoundRect(new SKRect(3.5f, 3.5f, 68.5f, 68.5f), 11, 11, rim);
+    }
+
+    static void EditorGlyph(SKCanvas canvas, EditorTool tool, SKColor color)
+    {
+        var white = new SKColor(250, 250, 252);
+        var light = Mix(color, SKColors.White, 0.55f);
+        var deep = Mix(SKColors.Black, color, 0.4f);
+        using var line = Stroke(white, 2.4f);
+        using var solid = Fill(white);
+        using var accent = Fill(light);
+
+        switch (tool)
+        {
+            case EditorTool.Select:
+            {
+                // Dashed marquee with a cursor over its corner.
+                using var dash = Stroke(light, 1.8f);
+                dash.PathEffect = SKPathEffect.CreateDash([4, 3], 0);
+                canvas.DrawRoundRect(new SKRect(15, 10, 47, 35), 2.5f, 2.5f, dash);
+                using var arrow = new SKPathBuilder();
+                arrow.MoveTo(37, 20); arrow.LineTo(37, 41); arrow.LineTo(42, 36.5f); arrow.LineTo(45.5f, 43.5f);
+                arrow.LineTo(48.5f, 42); arrow.LineTo(45, 35); arrow.LineTo(51.5f, 34.5f); arrow.Close();
+                using var path = arrow.Detach();
+                canvas.DrawPath(path, solid);
+                using var outline = Stroke(deep, 1.2f);
+                canvas.DrawPath(path, outline);
+                break;
+            }
+            case EditorTool.Connect:
+            {
+                // Node, curved connector, arrowhead.
+                using var curve = new SKPathBuilder();
+                curve.MoveTo(19, 33); curve.CubicTo(24, 12, 40, 34, 47, 17);
+                DrawPath(canvas, curve, line);
+                using var head = new SKPathBuilder();
+                head.MoveTo(53, 9); head.LineTo(51, 22); head.LineTo(42, 15); head.Close();
+                DrawPath(canvas, head, solid);
+                canvas.DrawCircle(17, 35, 5, accent);
+                using var ring = Stroke(white, 1.6f);
+                canvas.DrawCircle(17, 35, 5, ring);
+                break;
+            }
+            case EditorTool.Box:
+            {
+                // Rectangle with selection handles at the corners.
+                var r = new SKRect(19, 12, 53, 38);
+                using var fill = Fill(color.WithAlpha(90));
+                canvas.DrawRect(r, fill);
+                canvas.DrawRect(r, line);
+                using var handleRim = Stroke(deep, 1.2f);
+                foreach (var (hx, hy) in new[] { (r.Left, r.Top), (r.Right, r.Top), (r.Left, r.Bottom), (r.Right, r.Bottom) })
+                {
+                    var h = new SKRect(hx - 3.5f, hy - 3.5f, hx + 3.5f, hy + 3.5f);
+                    canvas.DrawRect(h, solid);
+                    canvas.DrawRect(h, handleRim);
+                }
+                break;
+            }
+            case EditorTool.Erase:
+            {
+                // A tilted two-tone eraser over a wiped-away dashed line.
+                using var wipe = Stroke(light.WithAlpha(160), 1.8f);
+                wipe.PathEffect = SKPathEffect.CreateDash([3, 3.5f], 0);
+                canvas.DrawLine(13, 40, 29, 40, wipe);
+                canvas.Save();
+                canvas.Translate(38, 24);
+                canvas.RotateDegrees(-40);
+                var body = new SKRect(-15, -8, 15, 8);
+                canvas.DrawRoundRect(body, 3.5f, 3.5f, solid);
+                canvas.Save();
+                canvas.ClipRect(new SKRect(-15, -8, -2, 8));
+                canvas.DrawRoundRect(body, 3.5f, 3.5f, accent);
+                canvas.Restore();
+                using var seam = Stroke(deep, 1.2f);
+                canvas.DrawLine(-2, -8, -2, 8, seam);
+                canvas.Restore();
+                break;
+            }
+            case EditorTool.Ungroup:
+            {
+                // Two shapes breaking out of a dashed group frame.
+                using var dash = Stroke(light.WithAlpha(170), 1.5f);
+                dash.PathEffect = SKPathEffect.CreateDash([3.5f, 3], 0);
+                canvas.DrawRoundRect(new SKRect(21, 15, 51, 37), 3, 3, dash);
+                canvas.DrawRoundRect(new SKRect(12, 8, 28, 24), 3, 3, solid);
+                canvas.DrawRoundRect(new SKRect(44, 28, 60, 44), 3, 3, accent);
+                using var rim = Stroke(white, 1.6f);
+                canvas.DrawRoundRect(new SKRect(44, 28, 60, 44), 3, 3, rim);
+                break;
+            }
+            case EditorTool.Metadata:
+            {
+                // A tag with a hole and two lines of text.
+                using var tag = new SKPathBuilder();
+                tag.MoveTo(14, 15); tag.LineTo(40, 15); tag.LineTo(53, 26); tag.LineTo(40, 37); tag.LineTo(14, 37); tag.Close();
+                DrawPath(canvas, tag, solid);
+                using var hole = Fill(deep);
+                canvas.DrawCircle(42, 26, 2.8f, hole);
+                using var text = Stroke(color, 2);
+                canvas.DrawLine(19, 22, 33, 22, text);
+                canvas.DrawLine(19, 30, 29, 30, text);
+                break;
+            }
+            case EditorTool.Image:
+            {
+                // Picture frame with sun and mountains.
+                var frame = new SKRect(14, 11, 58, 40);
+                using var sky = Fill(color.WithAlpha(110));
+                canvas.DrawRoundRect(frame, 4, 4, sky);
+                canvas.Save();
+                canvas.ClipRoundRect(new SKRoundRect(frame, 4), antialias: true);
+                using var hills = new SKPathBuilder();
+                hills.MoveTo(14, 40); hills.LineTo(28, 23); hills.LineTo(37, 33); hills.LineTo(43, 27); hills.LineTo(58, 40); hills.Close();
+                DrawPath(canvas, hills, solid);
+                canvas.Restore();
+                using var sun = Fill(new SKColor(253, 224, 71));
+                canvas.DrawCircle(47, 19, 3.8f, sun);
+                using var border = Stroke(white, 2.2f);
+                canvas.DrawRoundRect(frame, 4, 4, border);
+                break;
+            }
+            case EditorTool.Undo:
+            {
+                // Counter-clockwise arrow.
+                using var arc = Stroke(white, 3.2f);
+                canvas.DrawArc(new SKRect(22, 11, 52, 41), -150, 260, false, arc);
+                using var head = new SKPathBuilder();
+                head.MoveTo(14, 12); head.LineTo(28, 15); head.LineTo(18, 25); head.Close();
+                DrawPath(canvas, head, solid);
+                break;
+            }
+        }
     }
 
     public static void Launcher(SKCanvas canvas, AgentKind agent)

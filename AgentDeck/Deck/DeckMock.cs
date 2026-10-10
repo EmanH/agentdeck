@@ -62,6 +62,14 @@ static class DeckMock
             c => KeyArt.Mic(c, DictationState.Idle, 0, 0),
         ]);
 
+        Action<SKCanvas> Tool(KeyArt.EditorTool t) => c => KeyArt.Editor(c, t);
+        Render(Path.Combine(dir, "deck-editor.png"),
+        [
+            Tool(KeyArt.EditorTool.Image), Tool(KeyArt.EditorTool.Connect), Tool(KeyArt.EditorTool.Metadata), _ => { }, _ => { },
+            c => KeyArt.Editor(c, KeyArt.EditorTool.Ungroup, last: true), Tool(KeyArt.EditorTool.Select), Tool(KeyArt.EditorTool.Undo), _ => { }, _ => { },
+            Tool(KeyArt.EditorTool.Erase), Tool(KeyArt.EditorTool.Box), KeyArt.Back, _ => { }, _ => { },
+        ]);
+
         Render(Path.Combine(dir, "deck-hold-to-close.png"),
         [
             c => KeyArt.Project(c, agentDeck, true, 3),

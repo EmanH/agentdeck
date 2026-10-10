@@ -19,6 +19,20 @@ static class Input
         for (int i = modifiers.Length - 1; i >= 0; i--) keybd_event(modifiers[i], 0, KEYEVENTF_KEYUP, (UIntPtr)OurTag);
     }
 
+    /// <summary>Press (modifiers first, then the key) without releasing; pair with <see cref="Up"/>.</summary>
+    public static void Down(byte vk, params byte[] modifiers)
+    {
+        foreach (var m in modifiers) keybd_event(m, 0, 0, (UIntPtr)OurTag);
+        keybd_event(vk, 0, 0, (UIntPtr)OurTag);
+    }
+
+    /// <summary>Release the key, then its modifiers in reverse order.</summary>
+    public static void Up(byte vk, params byte[] modifiers)
+    {
+        keybd_event(vk, 0, KEYEVENTF_KEYUP, (UIntPtr)OurTag);
+        for (int i = modifiers.Length - 1; i >= 0; i--) keybd_event(modifiers[i], 0, KEYEVENTF_KEYUP, (UIntPtr)OurTag);
+    }
+
     /// <summary>Block until Ctrl, Shift, Alt and Win are up, so a synthetic Ctrl+V isn't read as Win+V.</summary>
     public static void WaitForModifiersReleased(int timeoutMs = 3000)
     {
