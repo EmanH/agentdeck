@@ -84,6 +84,7 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
         _tray = new TrayIcon(ShowFromTray, Quit);
 
         FirstRunSetup();
+        PastedImages.DeleteAll(); // left over if the last run was killed rather than quit
 
         _flushTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(8), DispatcherPriority.Normal, (_, _) => FlushOutput(), Dispatcher);
         // Poll each project's git branch so a checkout in any terminal shows up within a couple of seconds.
@@ -159,6 +160,7 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
         _hotkey.Dispose();
         _deck.Dispose();
         _sessions.CloseAll();
+        PastedImages.DeleteAll();
         _tray.Dispose();
         Close();
         Application.Current.Shutdown();
@@ -315,13 +317,24 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
         {
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.GetProperty("t").GetString() != "dropFiles" || paths.Length == 0) return;
-            int id = doc.RootElement.GetProperty("id").GetInt32();
-            if (_sessions.Get(id) == null) return;
-            // Quote anything a shell would split or interpret; separate several paths with spaces.
-            static string Quote(string p) => p.Any(c => char.IsWhiteSpace(c) || "&()[]{}^=;!'+,`~$@#%".Contains(c)) ? $"\"{p}\"" : p;
-            Post(new { t = "pasteInto", id, text = string.Join(' ', paths.Select(Quote)), submit = false });
+            PastePaths(doc.RootElement.GetProperty("id").GetInt32(), paths);
         }
         catch (Exception ex) { Log.Error("drop files", ex); }
+    }
+
+    /// <summary>Ctrl+V of an image (or files copied in Explorer) in a terminal: paste the file path(s) instead.</summary>
+    void PasteClipboardFiles(int id)
+    {
+        try { PastePaths(id, PastedImages.FromClipboard()); }
+        catch (Exception ex) { Log.Error("paste image", ex); }
+    }
+
+    void PastePaths(int id, string[] paths)
+    {
+        if (paths.Length == 0 || _sessions.Get(id) == null) return;
+        // Quote anything a shell would split or interpret; separate several paths with spaces.
+        static string Quote(string p) => p.Any(c => char.IsWhiteSpace(c) || "&()[]{}^=;!'+,`~$@#%".Contains(c)) ? $"\"{p}\"" : p;
+        Post(new { t = "pasteInto", id, text = string.Join(' ', paths.Select(Quote)), submit = false });
     }
 
     void OnWebMessage(string json)
@@ -355,6 +368,7 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
                     }
                     break;
                 case "input": _sessions.Write(Int("id"), Str("data")); break;
+                case "pasteImage": PasteClipboardFiles(Int("id")); break;
                 case "resize": _sessions.Resize(Int("id"), Int("cols"), Int("rows")); break;
                 case "title": _sessions.SetTitle(Int("id"), Str("title")); break;
                 case "screen": _analyzer.OnScreen(Int("id"), Str("text")); break;

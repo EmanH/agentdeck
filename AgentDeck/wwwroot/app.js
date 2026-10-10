@@ -97,9 +97,21 @@ function createPane(sid, projectId, agent) {
       navigator.clipboard.writeText(term.getSelection());
       term.clearSelection();
     } else {
-      navigator.clipboard.readText().then(text => text && term.paste(text)).catch(() => {});
+      // No text on the clipboard: maybe an image, which the host saves and pastes as a path.
+      navigator.clipboard.readText().then(text => text ? term.paste(text) : send({ t: 'pasteImage', id: sid }))
+        .catch(() => send({ t: 'pasteImage', id: sid }));
     }
   });
+  // Ctrl+V with an image (or Explorer-copied files) and no text: xterm can't paste that, so the host saves
+  // the image to a temp file and pastes its path, which agents like Claude Code attach. Capture phase, so
+  // it runs before xterm's own paste handler.
+  el.addEventListener('paste', e => {
+    const data = e.clipboardData;
+    if (!data || data.types.includes('text/plain') || !data.files.length) return;
+    e.preventDefault();
+    e.stopPropagation();
+    send({ t: 'pasteImage', id: sid });
+  }, true);
   new ResizeObserver(() => fitPane(pane)).observe(el);
 
   // Drop files from Explorer: the host resolves their real paths and pastes them into this terminal.
