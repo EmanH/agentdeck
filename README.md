@@ -35,7 +35,7 @@ Same flow as Wispr Flow: press a key, talk, press again, clean text appears. **W
 
 - **Trigger:** Stream Deck mic key, **`Ctrl+Shift+Win`** anywhere, or any mouse button mapped to it.
 - **Fast:** audio streams to Soniox (`stt-rt-v5`) while you talk; the transcript is ready ~0.3 s after you stop.
-- **Clean:** `gpt-6-luna` removes filler and repetition, fixes grammar, applies *"scratch that"*, and formats long dictation into paragraphs and bullets, in your own voice.
+- **Clean:** Claude Haiku 5.5 (falling back to `gpt-6-luna`) rewrites dictation as short, plain English: it removes filler and every repeated point, applies *"scratch that"*, reorders related points together, and formats long dictation into paragraphs and bullets.
 - **Targeted:** dictation started in an AgentDeck terminal lands in *that* terminal (and is submitted) even if you've switched apps.
 - **Launch and talk:** a deck *+ Claude / + Codex / + Grok* key opens the agent and starts dictating into it immediately; the text waits until the agent is ready.
 - **Custom dictionary:** your names and jargon are sent to Soniox as context and to the cleanup, which fixes near-misses (*sonics* → *Soniox*).
@@ -87,7 +87,8 @@ No SDK? Download `AgentDeck-*-win-x64.zip` from [Releases](https://github.com/Em
 | Env var | For |
 |---|---|
 | `SONIOX_API_KEY` | Dictation (required for dictation) |
-| `OPENAI_API_KEY` | Transcript cleanup and session titles (optional) |
+| `ANTHROPIC_API_KEY` | Transcript cleanup with Claude Haiku 5.5 (optional) |
+| `OPENAI_API_KEY` | Fallback transcript cleanup and session titles (optional) |
 | `TYPESAFE_AI_API_KEY` | Session icons on the Stream Deck (optional) |
 | `AGENTDECK_API_TOKEN` | Optional Bearer token for the localhost control API |
 | `AGENTDECK_API_PORT` | Control API port (default `17832`) |
@@ -135,7 +136,7 @@ curl.exe -X POST http://127.0.0.1:17832/workflows/WORKFLOW_ID/run
 
 ## Privacy
 
-Audio goes to Soniox only while the mic is on. Transcripts, and for untitled sessions your last few typed lines, go to OpenAI if `OPENAI_API_KEY` is set. To title and icon a terminal, the last 80 lines of its screen go to OpenAI and TypeSafe (whichever keys are set) every 30 s while it's changing. Transcripts are stored locally (`%APPDATA%\AgentDeck`); logs contain timings and session titles, never transcript or terminal text.
+Audio goes to Soniox only while the mic is on. Transcripts go to Anthropic if `ANTHROPIC_API_KEY` is set, and to OpenAI if that fails or isn't set. For untitled sessions your last few typed lines go to OpenAI if `OPENAI_API_KEY` is set. To title and icon a terminal, the last 80 lines of its screen go to OpenAI and TypeSafe (whichever keys are set) every 30 s while it's changing. Transcripts are stored locally (`%APPDATA%\AgentDeck`); logs contain timings and session titles, never transcript or terminal text.
 
 ## More
 

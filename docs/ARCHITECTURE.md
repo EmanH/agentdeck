@@ -9,7 +9,7 @@ touches the OS: pseudo consoles, the Stream Deck, the microphone, the global hot
 │     │                                   sidebar · tabs · split panes    │
 │     ├─ SessionManager ── PseudoConsole (ConPTY) ×N ── claude/codex/...  │
 │     ├─ DeckController ── StreamDeckSharp (USB HID) + KeyArt (Skia)      │
-│     ├─ DictationService ── NAudio ─▶ Soniox WS ─▶ gpt-6-luna ─▶ deliver │
+│     ├─ DictationService ── NAudio ─▶ Soniox WS ─▶ Claude Haiku ─▶ deliver│
 │     ├─ AgentCatalog ── probes the agent CLIs for models/thinking levels │
 │     ├─ ModifierHotkey (WH_KEYBOARD_LL) · TrayIcon · Chime               │
 │     └─ Stores: projects.json · workflows.json · transcripts.json        │
@@ -71,8 +71,9 @@ without the app, and is how the README screenshots are made.
 2. `SonioxSession` streams audio to Soniox's real-time API (`stt-rt-v5`) *while you speak*; audio captured before
    the socket opens is queued, so the first words are never lost. Stopping sends end-of-audio and waits for
    the final tokens (typically ~0.3 s).
-3. `gpt-6-luna` (Responses API, reasoning off, priority tier, connection pre-warmed at mic start) cleans the
-   text. On any failure or timeout the raw transcript is used.
+3. Claude Haiku 5.5 (`ClaudeClient`, Messages API, no SDK retries, connection pre-warmed at mic start) cleans the
+   text. If it fails or times out, `gpt-6-luna` (Responses API, reasoning off, priority tier) tries; if that
+   fails too, the raw transcript is used.
 4. Delivery: if dictation started in an AgentDeck terminal, the text goes straight into that terminal through
    xterm's `paste()` (bracketed paste when the app wants it) and is submitted if you've moved away. Otherwise
    it's pasted into the focused app with Ctrl+V, after waiting for the shortcut's modifiers to be released.

@@ -30,6 +30,7 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
     readonly WorkflowStore _workflows = new();
     readonly DictionaryStore _dictionary = new();
     readonly OpenAiClient _openai = new(Env.Get("OPENAI_API_KEY"));
+    readonly ClaudeClient _claude = new(Env.Get("ANTHROPIC_API_KEY"));
     readonly SessionManager _sessions;
     readonly SessionAnalyzer _analyzer;
     readonly DictationService _dictation;
@@ -74,7 +75,7 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
 
         _transcripts.Changed += () => Dispatcher.BeginInvoke(PushTranscripts);
         _dictionary.Changed += () => Dispatcher.BeginInvoke(PushDictionary);
-        _dictation = new DictationService(Env.Get("SONIOX_API_KEY"), _openai, _transcripts, _dictionary,
+        _dictation = new DictationService(Env.Get("SONIOX_API_KEY"), _claude, _openai, _transcripts, _dictionary,
                                           CaptureDictationTarget, DeliverDictationAsync);
         _workflows.Changed += () => Dispatcher.BeginInvoke(PushWorkflows);
         AgentCatalog.Changed += () => Dispatcher.BeginInvoke(PushAgentOptions);
