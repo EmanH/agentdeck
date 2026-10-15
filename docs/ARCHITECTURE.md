@@ -95,6 +95,7 @@ spinner/timer the whole time they (or their sub-agents) work, so silence is a re
 | Claude Code | aliases named in `claude --help` | the `--effort` list in `claude --help` |
 | Codex | `~/.codex/models_cache.json` (visible models) | per model, from the same cache |
 | Grok | `grok models` | the error for an invalid `--reasoning-effort` in `-p` mode |
+| OpenCode | none: its interactive UI has no `--model` flag, so it uses its own configured model | none |
 
 Workflows pass the choice as each CLI's own flags (`--model/--effort`, `-m/-c model_reasoning_effort=`,
 `-m/--reasoning-effort`). Prompts travel via a temp file and are escaped for Windows argv parsing, because

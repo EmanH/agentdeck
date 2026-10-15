@@ -7,8 +7,8 @@ const bridge = window.chrome.webview;
 const send = message => bridge.postMessage(message);
 const $ = selector => document.querySelector(selector);
 
-const AGENTS = ['claude', 'codex', 'grok', 'shell'];
-const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok', shell: 'Shell' };
+const AGENTS = ['claude', 'codex', 'grok', 'opencode', 'shell'];
+const AGENT_NAMES = { claude: 'Claude', codex: 'Codex', grok: 'Grok', opencode: 'OpenCode', shell: 'Shell' };
 
 // Windows Terminal's default "Campbell" scheme.
 const THEME = {
@@ -386,6 +386,7 @@ function handleShortcut(e) {
   else if (e.ctrlKey && e.shiftKey && code === 'Digit1') launch('claude');
   else if (e.ctrlKey && e.shiftKey && code === 'Digit2') launch('codex');
   else if (e.ctrlKey && e.shiftKey && code === 'Digit3') launch('grok');
+  else if (e.ctrlKey && e.shiftKey && code === 'Digit4') launch('opencode');
   else if (e.altKey && e.shiftKey && (code === 'Equal' || code === 'NumpadAdd')) launch('shell', 'right');
   else if (e.altKey && e.shiftKey && (code === 'Minus' || code === 'NumpadSubtract')) launch('shell', 'down');
   else if (e.altKey && !e.ctrlKey && !e.shiftKey && key.startsWith('arrow')) moveFocus(key.slice(5));
@@ -562,7 +563,7 @@ function renderEmpty(project, visible) {
     <div class="big-launchers">${AGENTS.map(a => `<button class="big-launch" data-agent="${a}" type="button">${agentIcon(a)}${AGENT_NAMES[a]}</button>`).join('')}</div>
     ${projectWorkflows().length ? `<div class="empty-workflows"><div class="label">Workflows</div><div class="chips">${projectWorkflows().map(w =>
       `<button class="chip" type="button" data-run="${w.id}" style="--wc:${w.color}" title="${escapeHtml(w.instructions)}">${iconImg(w.icon, 18) || agentIcon(w.agent)}${escapeHtml(w.name)}${agentIcon(w.agent, 'logo mini')}</button>`).join('')}</div></div>` : ''}
-    <div class="hint"><kbd>Ctrl+Shift+1</kbd> Claude · <kbd>2</kbd> Codex · <kbd>3</kbd> Grok · <kbd>Ctrl+Shift+T</kbd> shell</div></div>`;
+    <div class="hint"><kbd>Ctrl+Shift+1</kbd> Claude · <kbd>2</kbd> Codex · <kbd>3</kbd> Grok · <kbd>4</kbd> OpenCode · <kbd>Ctrl+Shift+T</kbd> shell</div></div>`;
   for (const b of empty.querySelectorAll('.big-launch')) b.addEventListener('click', () => launch(b.dataset.agent));
   for (const b of empty.querySelectorAll('.chip')) b.addEventListener('click', () => runWorkflow(b.dataset.run));
 }
@@ -900,7 +901,8 @@ let workflows = [];
 let workflowsOpen = false;
 let agentOptions = {};       // agent -> { models: [{ id, label, efforts, defaultEffort }], efforts, defaultModel }
 let onAgentOptions = null;   // editor hook to refresh its pickers when fresh options arrive
-const WORKFLOW_AGENTS = ['claude', 'codex', 'grok'];
+const WORKFLOW_AGENTS = ['claude', 'grok', 'opencode', 'codex'];
+const FIXED_MODEL_AGENTS = ['opencode']; // can't pick a model or thinking level at launch
 
 /** Workflows belong to a project; only the selected project's are offered. */
 const projectWorkflows = () => workflows.filter(w => w.projectId === state.selected);
@@ -1002,6 +1004,9 @@ function showWorkflowEditor(workflow, backToList = false) {
 
   // Models and thinking levels come from the agents at runtime (see AgentCatalog.cs).
   const refreshOptions = () => {
+    const fixed = FIXED_MODEL_AGENTS.includes(agent);
+    $('.wf-model-row').style.display = fixed ? 'none' : '';
+    if (fixed) { modelInput.value = ''; effort = ''; }
     const options = agentOptions[agent];
     $('#wf-models').innerHTML = (options?.models || []).map(m => `<option value="${escapeHtml(m.id)}">${escapeHtml(m.label)}</option>`).join('');
     modelInput.placeholder = options?.defaultModel ? `Default (${options.defaultModel})` : `Default (${AGENT_NAMES[agent]}'s own setting)`;

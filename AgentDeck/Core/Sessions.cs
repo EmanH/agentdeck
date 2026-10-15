@@ -3,7 +3,7 @@ using AgentDeck.Native;
 
 namespace AgentDeck.Core;
 
-public enum AgentKind { Shell, Claude, Codex, Grok }
+public enum AgentKind { Shell, Claude, Codex, Grok, OpenCode }
 
 public sealed class Session
 {
@@ -100,8 +100,8 @@ sealed class SessionManager
         var cwd = Directory.Exists(project.Path) ? project.Path : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var exe = agent.ToString().ToLowerInvariant();
         var command = agent == AgentKind.Shell ? "powershell.exe -NoLogo"
-            : prompt != null ? AgentWithPromptCommand(exe, prompt, AgentArgs(agent, model, effort))
-            : $"powershell.exe -NoLogo -NoExit -Command {exe}"; // back to a shell when the agent quits
+            : prompt != null ? AgentWithPromptCommand(exe, prompt, AgentArgs(agent, model, effort), PromptFlag(agent))
+            : $"powershell.exe -NoLogo -NoExit -Command {exe} {LaunchFlags(agent)}".TrimEnd(); // back to a shell when the agent quits
 
         Session session;
         lock (_gate)
@@ -143,12 +143,12 @@ sealed class SessionManager
     }
 
     /// <summary>
-    /// PowerShell command that starts the agent with an initial prompt (all three CLIs take one as their first
-    /// argument). The prompt travels via a temp file so the command line stays short. PowerShell 5.1 mangles
+    /// PowerShell command that starts the agent with an initial prompt (as its first argument, or after
+    /// <paramref name="promptFlag"/> for CLIs whose first argument is something else). The prompt travels via a temp file so the command line stays short. PowerShell 5.1 mangles
     /// native arguments containing quotes (splits them, drops empty ones), so we quote the prompt ourselves
     /// and hand it over verbatim with --% and an environment variable, which it expands without re-parsing.
     /// </summary>
-    static string AgentWithPromptCommand(string exe, string prompt, string args)
+    static string AgentWithPromptCommand(string exe, string prompt, string args, string? promptFlag)
     {
         var dir = Path.Combine(Log.Dir, "prompts");
         Directory.CreateDirectory(dir);
@@ -157,8 +157,9 @@ sealed class SessionManager
         var quoted = "'" + file.Replace("'", "''") + "'";
         var script =
             $"$env:AGENTDECK_PROMPT = [IO.File]::ReadAllText({quoted}); Remove-Item -LiteralPath {quoted}\n" +
-            // `--` ends option parsing, so a prompt starting with "-" (e.g. a bullet list) isn't read as a flag.
-            $"& {exe} --% {args} -- %AGENTDECK_PROMPT%\n" + // --% takes the rest of the line, so nothing may follow it
+            // `--` ends option parsing (and `--flag=` binds the value), so a prompt starting with "-" (e.g. a
+            // bullet list) isn't read as a flag.
+            $"& {exe} --% {args} {(promptFlag != null ? promptFlag + "=" : "-- ")}%AGENTDECK_PROMPT%\n" + // --% takes the rest of the line, so nothing may follow it
             "Remove-Item Env:AGENTDECK_PROMPT";
         return "powershell.exe -NoLogo -NoExit -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
     }
@@ -179,11 +180,16 @@ sealed class SessionManager
         return sb.Append('\\', backslashes * 2).Append('"').ToString(); // before the closing quote
     }
 
-    /// <summary>Each CLI's own flags for model and thinking level. Values are restricted to a safe charset.</summary>
+    /// <summary>
+    /// Each CLI's own flags for model and thinking level. Values are restricted to a safe charset. OpenCode's
+    /// interactive UI takes neither, so it always uses its own configured model.
+    /// </summary>
     static string AgentArgs(AgentKind agent, string? model, string? effort)
     {
         static bool Safe(string? v) => !string.IsNullOrEmpty(v) && System.Text.RegularExpressions.Regex.IsMatch(v, @"^[A-Za-z0-9._:\[\]\-]+$");
         var args = new List<string>();
+        if (LaunchFlags(agent) is { Length: > 0 } flags) args.Add(flags);
+        if (agent == AgentKind.OpenCode) return string.Join(' ', args);
         if (Safe(model)) args.Add(agent == AgentKind.Claude ? $"--model {model}" : $"-m {model}");
         if (Safe(effort))
             args.Add(agent switch
@@ -194,6 +200,12 @@ sealed class SessionManager
             });
         return string.Join(' ', args);
     }
+
+    /// <summary>Flags every launch of this agent gets. Claude runs without permission prompts.</summary>
+    static string LaunchFlags(AgentKind agent) => agent == AgentKind.Claude ? "--dangerously-skip-permissions" : "";
+
+    /// <summary>The flag that carries the initial prompt, or null if the CLI takes it as its first argument.</summary>
+    static string? PromptFlag(AgentKind agent) => agent == AgentKind.OpenCode ? "--prompt" : null;
 
     string NextDefaultName(string projectId, AgentKind agent)
     {
@@ -275,7 +287,7 @@ sealed class SessionManager
         t = t[start..].Trim();
         if (t.Length < 2) return null;
         var lower = t.ToLowerInvariant();
-        string[] boring = ["claude", "claude code", "codex", "grok", "grok build", "windows powershell", "powershell",
+        string[] boring = ["claude", "claude code", "codex", "grok", "grok build", "opencode", "windows powershell", "powershell",
                            "administrator: windows powershell"];
         if (boring.Contains(lower) || lower.EndsWith(".exe") || t.Contains('\\') || t.Contains(":/") || t.StartsWith('/'))
             return null;
@@ -319,11 +331,12 @@ sealed class SessionManager
             if (s.Inputs.Count > 8) s.Inputs.RemoveAt(0);
         }
 
-        // Typing "claude" / "codex" / "grok" in a plain shell turns it into that agent's session.
+        // Typing "claude" / "codex" / "grok" / "opencode" in a plain shell turns it into that agent's session.
         if (s.Agent == AgentKind.Shell)
         {
             var first = line.Split(' ')[0].ToLowerInvariant();
-            AgentKind? detected = first switch { "claude" => AgentKind.Claude, "codex" => AgentKind.Codex, "grok" => AgentKind.Grok, _ => null };
+            AgentKind? detected = first switch { "claude" => AgentKind.Claude, "codex" => AgentKind.Codex, "grok" => AgentKind.Grok,
+                "opencode" => AgentKind.OpenCode, _ => null };
             if (detected is { } agent)
             {
                 s.Agent = agent;

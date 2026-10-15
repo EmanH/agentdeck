@@ -120,7 +120,7 @@ sealed class ControlServer : IDisposable
                 {
                     var body = await ReadBody(req);
                     if (!TryParseAgent(body.Agent, out var agent))
-                    { await WriteJson(res, 400, new { error = "agent required (claude|codex|grok|shell)" }); return; }
+                    { await WriteJson(res, 400, new { error = "agent required (claude|codex|grok|opencode|shell)" }); return; }
                     var session = await OnUi(() => _actions.NewSession(body.ProjectId, agent, body.Prompt, body.Model, body.Effort, body.Name));
                     if (session == null) { await WriteJson(res, 400, new { error = "could not start session (missing project?)" }); return; }
                     await WriteJson(res, 200, new { ok = true, id = session.Id, projectId = session.ProjectId, agent = session.Agent.ToString().ToLowerInvariant(), label = session.Label });
@@ -170,7 +170,7 @@ sealed class ControlServer : IDisposable
                 {
                     var body = await ReadBody(req);
                     if (!TryParseAgent(body.Agent, out var agent) || agent == AgentKind.Shell)
-                    { await WriteJson(res, 400, new { error = "agent required (claude|codex|grok)" }); return; }
+                    { await WriteJson(res, 400, new { error = "agent required (claude|codex|grok|opencode)" }); return; }
                     var session = await OnUi(() => _actions.Launch(agent));
                     if (session == null) { await WriteJson(res, 400, new { error = "could not launch (no project selected?)" }); return; }
                     await WriteJson(res, 200, new { ok = true, id = session.Id, projectId = session.ProjectId, agent = session.Agent.ToString().ToLowerInvariant() });

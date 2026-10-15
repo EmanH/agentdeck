@@ -37,7 +37,7 @@ sealed class DeckController : IDisposable
     const int MoreKey = 10, RepasteKey = 11, WorkflowsKey = 12, EnterKey = 13, MicKey = 14, KeyCount = 15;
     const int RepasteMs = 10_000; // "paste again" shows this long after a transcript (or its last press)
     const int HoldMs = 800, HoldVisibleAfterMs = 150, PickerTimeoutMs = 10_000;
-    static readonly AgentKind[] LaunchAgents = [AgentKind.Claude, AgentKind.Codex, AgentKind.Grok];
+    static readonly AgentKind[] LaunchAgents = [AgentKind.Claude, AgentKind.Grok, AgentKind.OpenCode, AgentKind.Codex];
     const int EditorFlashMs = 280;
 
     /// <summary>Editor mode: each key presses its shortcut in whatever app has focus, auto-repeating while held. A 3x3 block on the left for a left thumb; Back completes it bottom-right.</summary>

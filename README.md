@@ -4,7 +4,7 @@
 
 # AgentDeck
 
-**A thin wrapper around your agents' real terminal UIs, for running many Claude Code, Codex and Grok sessions across many projects. Plus a Stream Deck control surface and system-wide voice dictation.**
+**A thin wrapper around your agents' real terminal UIs, for running many Claude Code, Codex, Grok and OpenCode sessions across many projects. Plus a Stream Deck control surface and system-wide voice dictation.**
 
 ![Windows 11](https://img.shields.io/badge/Windows-11-0078D4?logo=windows11&logoColor=white)
 ![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet&logoColor=white)
@@ -19,12 +19,12 @@
 
 ## Same agents, same terminal UIs, just organised
 
-AgentDeck is not a new agent UI. Claude Code, Codex and Grok run **unmodified, in real terminals**
+AgentDeck is not a new agent UI. Claude Code, Codex, Grok and OpenCode run **unmodified, in real terminals**
 (ConPTY, the same plumbing as Windows Terminal), so every TUI feature, keybinding, slash command and update
 works exactly as it does in your usual terminal. AgentDeck only adds a thin layer around them:
 
 - **Sessions grouped by project:** every project is a folder with its own tabs, split panes and agents; switch projects and they're right where you left them.
-- **Mix agents freely:** Claude, Codex, Grok and plain shells side by side, each opened in the project folder in one press.
+- **Mix agents freely:** Claude, Codex, Grok, OpenCode and plain shells side by side, each opened in the project folder in one press.
 - **See every session at once:** AI titles and icons that follow each conversation, busy dots and ✦ finished alerts in the tabs and on the Stream Deck, so you know which agent needs you.
 - **Know where you are:** each project's current git branch, in the sidebar and the tab bar, updated as you check out.
 - **Jump anywhere:** one key press brings any session to the front, in any project.
@@ -37,7 +37,7 @@ Same flow as Wispr Flow: press a key, talk, press again, clean text appears. **W
 - **Fast:** audio streams to Soniox (`stt-rt-v5`) while you talk; the transcript is ready ~0.3 s after you stop.
 - **Clean:** Claude Haiku 5.5 (falling back to `gpt-6-luna`) rewrites dictation as short, plain English: it removes filler and every repeated point, applies *"scratch that"*, reorders related points together, and formats long dictation into paragraphs and bullets.
 - **Targeted:** dictation started in an AgentDeck terminal lands in *that* terminal (and is submitted) even if you've switched apps.
-- **Launch and talk:** a deck *+ Claude / + Codex / + Grok* key opens the agent and starts dictating into it immediately; the text waits until the agent is ready.
+- **Launch and talk:** a deck *+ Claude / + Codex / + Grok / + OpenCode* key opens the agent and starts dictating into it immediately; the text waits until the agent is ready. Claude always starts with `--dangerously-skip-permissions`, so it never stops to ask before running tools.
 - **Custom dictionary:** your names and jargon are sent to Soniox as context and to the cleanup, which fixes near-misses (*sonics* → *Soniox*).
 - **Audio cues:** a soft rising pop when the mic opens, the same pop falling when it closes.
 - **Enter** mid-dictation = stop, paste, submit. **Double-tap** the mic = cancel.
@@ -49,7 +49,7 @@ Same flow as Wispr Flow: press a key, talk, press again, clean text appears. **W
 |---|---|
 | **Projects** | Each project is a folder with its own icon, color, terminals and workflows. |
 | **Terminals** | Real ConPTY terminals (same as Windows Terminal) rendered with xterm.js/WebGL: tabs (drag to reorder), split panes, 24-bit color, color emoji. Drop files on a terminal to paste their paths. Agent TUIs run unchanged. |
-| **Agents** | One press/click/shortcut opens Claude, Codex or Grok in the project folder. |
+| **Agents** | One press/click/shortcut opens Claude, Codex, Grok or OpenCode in the project folder. |
 | **Stream Deck** | Projects, live sessions (title + icon), launchers, workflows, Enter, mic. Tap to jump, hold 0.8 s to close. No Elgato software needed. |
 | **Session titles & icons** | Every 30 s, terminals whose screen changed get a 2-4 word title (`gpt-6-luna`) and an emoji picked by the TypeSafe Jev classifier from ~160 work-themed icons. Idle terminals cost nothing. |
 | **Git branch** | The selected project's branch in the tab bar; every project's branch in the sidebar. |
@@ -93,7 +93,7 @@ No SDK? Download `AgentDeck-*-win-x64.zip` from [Releases](https://github.com/Em
 | `AGENTDECK_API_TOKEN` | Optional Bearer token for the localhost control API |
 | `AGENTDECK_API_PORT` | Control API port (default `17832`) |
 
-Agent CLIs on `PATH`: `claude`, `codex`, `grok`.
+Agent CLIs on `PATH`: `claude`, `codex`, `grok`, `opencode`.
 
 
 ## Local control API
@@ -129,7 +129,7 @@ curl.exe -X POST http://127.0.0.1:17832/workflows/WORKFLOW_ID/run
 | Keys | Action |
 |---|---|
 | `Ctrl+Shift+Win` | Dictation start/stop (global; double-press cancels) |
-| `Ctrl+Shift+1/2/3` | New Claude / Codex / Grok terminal |
+| `Ctrl+Shift+1/2/3/4` | New Claude / Codex / Grok / OpenCode terminal |
 | `Ctrl+Shift+T` · `Ctrl+Shift+W` | New shell tab · close pane |
 | `Alt+Shift+=` · `Alt+Shift+-` · `Alt+Arrow` | Split right · split down · move focus |
 | `Ctrl+Tab` · `Ctrl+=/-/0` | Next tab · font size |

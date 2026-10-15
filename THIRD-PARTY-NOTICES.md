@@ -12,7 +12,7 @@ AgentDeck builds on these open-source projects. Thank you to their authors.
 | [Microsoft WebView2](https://learn.microsoft.com/microsoft-edge/webview2/) | UI host | Microsoft Software License |
 | [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) (flat, via `@iconify-json/fluent-emoji-flat`) | Project and workflow icon library | MIT |
 | [emojilib](https://github.com/muan/emojilib) | Icon search keywords | MIT |
-| [LobeHub Icons](https://github.com/lobehub/lobe-icons) (`@lobehub/icons-static-svg`) | Claude / Codex / Grok logos | MIT |
+| [LobeHub Icons](https://github.com/lobehub/lobe-icons) (`@lobehub/icons-static-svg`) | Claude / Codex / Grok / OpenCode logos | MIT |
 | [python-elgato-streamdeck](https://github.com/abcminiuser/python-elgato-streamdeck) | Python prototype only | MIT |
 | [hidapi](https://github.com/libusb/hidapi) | Python prototype only (not redistributed) | BSD / GPLv3 / original |
 
