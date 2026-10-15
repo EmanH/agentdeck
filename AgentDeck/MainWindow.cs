@@ -110,7 +110,7 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
         }
         Show();
 
-        _control = new ControlServer(Dispatcher, this);
+        _control = new ControlServer(Dispatcher, this, new AgentTranscripts(_sessions, id => _projects.Get(id)?.Path));
         _control.Start();
     }
 

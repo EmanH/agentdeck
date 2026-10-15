@@ -24,10 +24,14 @@ public sealed class Session
     internal PseudoConsole Pty = null!;
     internal readonly StringBuilder Line = new();
     internal readonly List<string> Inputs = [];
+    internal readonly List<DateTime> InputTimes = []; // UTC, parallel to Inputs
     internal CancellationTokenSource? SummaryCts;
     internal bool Analyzing;               // SessionAnalyzer: a title/icon analysis is in flight
     internal int ScreenHash;               // SessionAnalyzer: the screen last analysed
     internal long AnalyzedTicks;           // SessionAnalyzer: when
+    internal string? LaunchTranscriptId;   // the --session-id the agent was started with (Claude/Grok)
+    internal TranscriptRef? Transcript;    // AgentTranscripts: the agent's transcript file, once found
+    internal long TranscriptCheckedTicks;  // AgentTranscripts: last search for a newer transcript
 
     public string Label => Topic ?? Title ?? Summary ?? DefaultName;
     /// <summary>Working on something the user submitted: output since the submit, and recently.</summary>
@@ -86,6 +90,8 @@ sealed class SessionManager
         Changed?.Invoke();
     }
     public Session? Get(int id) { lock (_gate) return _sessions.Find(s => s.Id == id); }
+    /// <summary>The lines last typed or pasted into a terminal and when (UTC), oldest first (best effort, at most 8).</summary>
+    public (string Text, DateTime At)[] RecentInputs(Session s) { lock (_gate) return [.. s.Inputs.Zip(s.InputTimes)]; }
 
     /// <summary>Something outside (e.g. the analyzer) changed a session's label or icon.</summary>
     public void NotifyChanged() => Changed?.Invoke();
@@ -99,14 +105,16 @@ sealed class SessionManager
     {
         var cwd = Directory.Exists(project.Path) ? project.Path : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var exe = agent.ToString().ToLowerInvariant();
+        // Claude and Grok take the conversation id up front, so we know which transcript file is this terminal's.
+        var transcriptId = AgentTranscripts.Supports(agent) ? Guid.NewGuid().ToString() : null;
         var command = agent == AgentKind.Shell ? "powershell.exe -NoLogo"
-            : prompt != null ? AgentWithPromptCommand(exe, prompt, AgentArgs(agent, model, effort), PromptFlag(agent))
-            : $"powershell.exe -NoLogo -NoExit -Command {exe} {LaunchFlags(agent)}".TrimEnd(); // back to a shell when the agent quits
+            : prompt != null ? AgentWithPromptCommand(exe, prompt, AgentArgs(agent, model, effort, transcriptId), PromptFlag(agent))
+            : $"powershell.exe -NoLogo -NoExit -Command {exe} {LaunchFlags(agent, transcriptId)}".TrimEnd(); // back to a shell when the agent quits
 
         Session session;
         lock (_gate)
         {
-            session = new Session { Id = _nextId++, ProjectId = project.Id, Agent = agent };
+            session = new Session { Id = _nextId++, ProjectId = project.Id, Agent = agent, LaunchTranscriptId = transcriptId };
             session.SortKey = _sessions.Where(s => s.ProjectId == project.Id).Select(s => s.SortKey + 1).DefaultIfEmpty(0).Max(); // new tabs go last
             session.DefaultName = name ?? NextDefaultName(project.Id, agent);
             session.LastOutputTicks = Environment.TickCount64;
@@ -184,11 +192,11 @@ sealed class SessionManager
     /// Each CLI's own flags for model and thinking level. Values are restricted to a safe charset. OpenCode's
     /// interactive UI takes neither, so it always uses its own configured model.
     /// </summary>
-    static string AgentArgs(AgentKind agent, string? model, string? effort)
+    static string AgentArgs(AgentKind agent, string? model, string? effort, string? transcriptId)
     {
         static bool Safe(string? v) => !string.IsNullOrEmpty(v) && System.Text.RegularExpressions.Regex.IsMatch(v, @"^[A-Za-z0-9._:\[\]\-]+$");
         var args = new List<string>();
-        if (LaunchFlags(agent) is { Length: > 0 } flags) args.Add(flags);
+        if (LaunchFlags(agent, transcriptId) is { Length: > 0 } flags) args.Add(flags);
         if (agent == AgentKind.OpenCode) return string.Join(' ', args);
         if (Safe(model)) args.Add(agent == AgentKind.Claude ? $"--model {model}" : $"-m {model}");
         if (Safe(effort))
@@ -201,8 +209,13 @@ sealed class SessionManager
         return string.Join(' ', args);
     }
 
-    /// <summary>Flags every launch of this agent gets. Claude runs without permission prompts.</summary>
-    static string LaunchFlags(AgentKind agent) => agent == AgentKind.Claude ? "--dangerously-skip-permissions" : "";
+    /// <summary>Flags every launch of this agent gets. Claude runs without permission prompts; Claude and Grok get
+    /// the conversation id we chose (a GUID, so it needs no quoting).</summary>
+    static string LaunchFlags(AgentKind agent, string? transcriptId)
+    {
+        var flags = agent == AgentKind.Claude ? "--dangerously-skip-permissions" : "";
+        return transcriptId != null ? $"{flags} --session-id {transcriptId}".TrimStart() : flags;
+    }
 
     /// <summary>The flag that carries the initial prompt, or null if the CLI takes it as its first argument.</summary>
     static string? PromptFlag(AgentKind agent) => agent == AgentKind.OpenCode ? "--prompt" : null;
@@ -328,7 +341,8 @@ sealed class SessionManager
         lock (_gate)
         {
             s.Inputs.Add(line.Length > 300 ? line[..300] : line);
-            if (s.Inputs.Count > 8) s.Inputs.RemoveAt(0);
+            s.InputTimes.Add(DateTime.UtcNow);
+            if (s.Inputs.Count > 8) { s.Inputs.RemoveAt(0); s.InputTimes.RemoveAt(0); }
         }
 
         // Typing "claude" / "codex" / "grok" / "opencode" in a plain shell turns it into that agent's session.

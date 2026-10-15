@@ -101,6 +101,32 @@ Workflows pass the choice as each CLI's own flags (`--model/--effort`, `-m/-c mo
 `-m/--reasoning-effort`). Prompts travel via a temp file and are escaped for Windows argv parsing, because
 Windows PowerShell 5.1 doesn't escape embedded quotes when calling native programs.
 
+## Agent transcripts
+
+The control API shows what each terminal's agent is saying by reading the agent's own conversation file
+(`Core/AgentTranscripts.cs`, read-only, off the UI thread). Claude Code and Grok are supported; Codex and
+OpenCode aren't.
+
+| Agent | File | Notes |
+|---|---|---|
+| Claude Code | `~/.claude/projects/<cwd, non-alphanumerics → '-'>/<id>.jsonl` | one line per content block, ISO timestamps |
+| Grok | `~/.grok/sessions/<url-encoded cwd>/<id>/chat_history.jsonl` | no per-message timestamps; the cwd folder's `prompt_history.jsonl` lists every prompt with its session id and time |
+
+- **Which file:** AgentDeck starts both CLIs with `--session-id <new GUID>`, which names the file, so several
+  terminals in one project never get mixed up. The conversation can move to another file later: `/clear`,
+  `/resume`, quitting and re-running the agent in the same terminal, or typing `claude`/`grok` into a plain
+  shell. Every 4 s at most (only when the API asks), the newest line typed into the terminal (10+ characters,
+  from `SessionManager`'s input tracking) is looked up among prompts sent *at or after* it was typed in the
+  project's recent transcripts. If it landed in a different file that no other terminal owns, the session
+  switches to it (`source: "detected"`). Short replies such as `yes` or `1` never trigger a switch.
+- **Reading:** files are read backwards in 64 KB chunks with full sharing (the agent keeps writing), so 20
+  messages from an 80 MB transcript take ~10 ms. A half-written last line just fails to parse and is skipped.
+  Activity (last assistant text, last tool call) is cached until the file's length or write time changes.
+- **Normalizing:** thinking/reasoning, sub-agent (sidechain) lines, `isMeta` lines and injected context
+  (`<system-reminder>`, Grok's `<user_info>`) are dropped; slash commands become `/name args`; Grok prompts are
+  unwrapped from `<user_query>`. Tool results are named from their calls (reading a little further back when
+  the call is just outside the requested window).
+
 ## Icons
 
 `AgentDeck/tools/build-icons.mjs` builds `wwwroot/icons/fluent.json` (1,591 Fluent Emoji, flat style) with

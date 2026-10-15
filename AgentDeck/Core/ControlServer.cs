@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Windows.Threading;
 
 namespace AgentDeck.Core;
@@ -22,15 +23,17 @@ sealed class ControlServer : IDisposable
     readonly HttpListener _listener = new();
     readonly Dispatcher _ui;
     readonly IControlActions _actions;
+    readonly AgentTranscripts _transcripts;
     readonly string? _token;
     readonly int _port;
     readonly CancellationTokenSource _cts = new();
     Thread? _thread;
 
-    public ControlServer(Dispatcher ui, IControlActions actions, int? port = null)
+    public ControlServer(Dispatcher ui, IControlActions actions, AgentTranscripts transcripts, int? port = null)
     {
         _ui = ui;
         _actions = actions;
+        _transcripts = transcripts;
         _port = port ?? ParsePort(Env.Get("AGENTDECK_API_PORT")) ?? DefaultPort;
         _token = Env.Get("AGENTDECK_API_TOKEN");
     }
@@ -103,8 +106,35 @@ sealed class ControlServer : IDisposable
                     await WriteJson(res, 200, new { ok = true, port = _port });
                     return;
                 case "GET" when path == "/state":
-                    await WriteJson(res, 200, await OnUi(() => _actions.GetState()));
+                {
+                    // Transcript lookups read files, so they're added here, off the UI thread.
+                    var state = JsonSerializer.SerializeToNode(await OnUi(() => _actions.GetState()), Json)!;
+                    if (state["sessions"] is JsonArray list)
+                        foreach (var node in list.OfType<JsonObject>())
+                            if (node["id"]?.GetValue<int>() is int id && _transcripts.Get(id) is { } s)
+                            {
+                                var t = _transcripts.Find(s);
+                                node["transcript"] = t == null ? null : JsonSerializer.SerializeToNode(t, Json);
+                                node["activity"] = t != null && _transcripts.Activity(t) is { } a ? JsonSerializer.SerializeToNode(a, Json) : null;
+                            }
+                    await WriteJson(res, 200, state);
                     return;
+                }
+                case "GET" when Match(path, "/sessions/", "/messages", out int sid):
+                {
+                    if (_transcripts.Get(sid) is not { } s) { await WriteJson(res, 404, new { error = "session not found" }); return; }
+                    int limit = int.TryParse(req.QueryString["limit"], out int l) ? Math.Clamp(l, 1, 500) : 20;
+                    var t = _transcripts.Find(s);
+                    var agent = s.Agent.ToString().ToLowerInvariant();
+                    var note = !AgentTranscripts.Supports(s.Agent) ? $"transcripts are only read for claude and grok sessions (this one is {agent})"
+                        : t == null ? "transcript not found yet: this agent wasn't started by AgentDeck with a session id, and no prompt typed here has turned up in its recent transcripts"
+                        : t.Path == null ? "transcript not created yet: the agent writes it once the first prompt is sent"
+                        : s.Agent == AgentKind.Grok ? "grok's chat history has no per-message timestamps"
+                        : null;
+                    var messages = t != null ? _transcripts.Messages(t, limit) : new List<TranscriptEntry>();
+                    await WriteJson(res, 200, new { id = s.Id, agent, transcript = t, messages, note });
+                    return;
+                }
                 case "GET" when path == "/workflows":
                     await WriteJson(res, 200, await OnUi(() => new { workflows = _actions.GetWorkflows() }));
                     return;

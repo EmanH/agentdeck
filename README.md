@@ -103,7 +103,8 @@ AgentDeck exposes a localhost-only HTTP JSON API (default `http://127.0.0.1:1783
 | Method | Path | Body |
 |---|---|---|
 | GET | `/health` | |
-| GET | `/state` | projects, selected, sessions (id/projectId/agent/label/done/working/busy/active), branches |
+| GET | `/state` | projects, selected, sessions (id/projectId/agent/label/done/working/busy/active/transcript/activity), branches |
+| GET | `/sessions/{id}/messages?limit=N` | the agent's last N transcript entries (default 20, max 500, from the last 32 MB of the file), oldest first |
 | GET | `/workflows` | |
 | POST | `/projects/select` | `{ "id" }` |
 | POST | `/sessions/new` | `{ "projectId?", "agent", "prompt?", "model?", "effort?", "name?" }` |
@@ -122,7 +123,29 @@ curl.exe http://127.0.0.1:17832/health
 curl.exe http://127.0.0.1:17832/state
 curl.exe -X POST http://127.0.0.1:17832/launch -H "Content-Type: application/json" -d "{\"agent\":\"claude\"}"
 curl.exe -X POST http://127.0.0.1:17832/workflows/WORKFLOW_ID/run
+curl.exe "http://127.0.0.1:17832/sessions/3/messages?limit=10"
 ```
+
+### What agents are saying
+
+For Claude Code and Grok sessions, AgentDeck knows which conversation file each terminal is writing (it starts
+them with `--session-id`, and follows `/clear`, `/resume` or a re-run agent by matching what you typed). Each
+`/state` session gets:
+
+```jsonc
+"transcript": { "agent": "claude", "sessionId": "…", "path": "C:\\Users\\…\\.claude\\projects\\…\\….jsonl",
+                "source": "launch" },          // "detected" after the conversation moved; no path until the first prompt
+"activity": { "lastAssistantText": "…",       // up to ~300 chars
+              "lastToolName": "Bash", "lastToolDetail": "Run the tests",
+              "lastActivityAt": "2026-10-16T05:42:10.12+00:00" }
+```
+
+Both are `null` for Codex, OpenCode and shells, or when the conversation isn't known yet. `/sessions/{id}/messages`
+returns `{ id, agent, transcript, messages, note? }`, each message being
+`{ timestamp, role (user|assistant|tool), kind (text|tool_use|tool_result), text, toolName? }`. Text is cut at 2,000
+characters; tool calls carry a one-line summary of their input. `note` says why `messages` is empty, or that
+Grok's history has no per-message timestamps (`timestamp` is omitted, and `lastActivityAt` is the file's last
+write). Files are tailed from the end, so large transcripts stay cheap. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#agent-transcripts).
 
 ## Shortcuts
 
