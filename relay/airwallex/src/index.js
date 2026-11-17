@@ -1,9 +1,13 @@
 // Receives Airwallex webhooks, keeps a short queue of "new payment / new subscriber" summaries in KV,
 // and serves them plus MRR / active-subscriber stats to AgentDeck on the PC. The PC polls; nothing reaches it inbound.
 
-const TTL = 30 * 24 * 3600;
+// KV budget (free tier: 100k reads, 1k writes and 1k lists a day): every event lives in ONE record, "recent",
+// so a poll is a single read and a webhook is a read plus a write. No KV list() calls anywhere.
+const KEEP_MS = 30 * 24 * 3600 * 1000;
+const KEEP_MAX = 500;
 const TOLERANCE_MS = 5 * 60 * 1000;
 const STATS_CACHE_S = 300;
+const STATS_CACHE_KEY = "https://relay.internal/stats";
 
 export default {
   async fetch(req, env) {
@@ -13,12 +17,10 @@ export default {
       if (req.method === "POST" && url.pathname === "/test") {
         if (!authorized(req, env)) return new Response("unauthorized", { status: 401 });
         const id = `test_${Date.now()}`;
-        const key = `evt:${String(Date.now()).padStart(15, "0")}:${id}`;
-        const fake = { key, kind: "payment", ref: id, label: "test@example.com", amount: 49, currency: "AUD", at: Date.now(),
+        const fake = { id, kind: "payment", ref: id, label: "test@example.com", amount: 49, currency: "AUD", at: Date.now(),
           url: env.PAYMENT_URL.replace("{id}", id), country: "NZ", customer: "Test Customer", email: "test@example.com",
           method: "VISA •••• 4242", cardCountry: "NZ", funding: "credit", description: "Pro plan (test)", orderId: "order-test", risk: 12 };
-        await env.EVENTS.put(key, JSON.stringify(fake), { expirationTtl: 3600 });
-        return Response.json(fake);
+        return Response.json(await append(env, fake));
       }
       if (req.method === "GET" && (url.pathname === "/events" || url.pathname === "/stats")) {
         if (!authorized(req, env)) return new Response("unauthorized", { status: 401 });
@@ -60,16 +62,30 @@ async function webhook(req, env) {
 
   const evt = JSON.parse(body);
   const summary = summarize(evt, env);
-  // Airwallex retries deliveries, so dedupe on the event id.
-  // One "checkout" card per intent, however many created/pending events it sends.
-  const dedupe = summary?.kind === "intent" ? `seen:intent:${summary.ref}` : `seen:${evt.id}`;
-  if (summary && !(await env.EVENTS.get(dedupe))) {
-    const key = `evt:${String(Date.now()).padStart(15, "0")}:${evt.id}`; // sorts by arrival
-    await env.EVENTS.put(key, JSON.stringify({ ...summary, key }), { expirationTtl: TTL });
-    await env.EVENTS.put(dedupe, key, { expirationTtl: TTL });
-    await env.EVENTS.delete("stats"); // MRR may have changed
-  }
+  if (summary) await append(env, { id: evt.id, ...summary });
   return new Response("ok"); // 200 for every verified event, including ones we ignore
+}
+
+async function loadRecent(env) {
+  return (await env.EVENTS.get("recent", "json")) ?? [];
+}
+
+// Adds an event to "recent" unless it's a retry (same event id) or a second created/pending for the same checkout.
+// Read-modify-write of one key: two webhooks in the same instant could drop one, which is fine for a desk notifier.
+async function append(env, e) {
+  const recent = await loadRecent(env);
+  const dup = recent.some(r => r.id === e.id || (e.kind === "intent" && r.kind === "intent" && r.ref === e.ref));
+  if (dup) return e;
+  const now = Date.now();
+  // Keys sort by arrival; the PC keeps the last one it saw as its cursor.
+  e.key = `evt:${String(now).padStart(15, "0")}:${e.id}`;
+  e.at ??= now;
+  const arrived = r => Number(r.key.slice(4, 19));
+  // Keep 30 days; test events only an hour.
+  const kept = recent.filter(r => now - arrived(r) < (String(r.ref).startsWith("test_") ? 3600e3 : KEEP_MS));
+  kept.push(e);
+  await env.EVENTS.put("recent", JSON.stringify(kept.slice(-KEEP_MAX)));
+  return e;
 }
 
 // Payment-intent fields vary by payment method and API version; look in the likely places.
@@ -117,19 +133,11 @@ function summarize(evt, env) {
 
 async function events(url, env) {
   // ?latest=1 returns only a cursor (first run); ?after=<key> returns everything newer.
+  const recent = await loadRecent(env);
   const after = url.searchParams.get("after");
-  const keys = [];
-  let cursor;
-  do {
-    const page = await env.EVENTS.list({ prefix: "evt:", cursor });
-    for (const k of page.keys) if (!after || k.name > after) keys.push(k.name);
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  keys.sort();
-  const newest = keys.at(-1) ?? after ?? "evt:0";
-  if (url.searchParams.has("latest")) return Response.json({ events: [], cursor: newest });
-  const values = await Promise.all(keys.map(k => env.EVENTS.get(k, "json")));
-  return Response.json({ events: values.filter(Boolean), cursor: newest });
+  const newer = recent.filter(e => !after || e.key > after);
+  const cursor = recent.at(-1)?.key ?? after ?? "evt:0";
+  return Response.json({ events: url.searchParams.has("latest") ? [] : newer, cursor });
 }
 
 async function airwallexToken(env) {
@@ -164,8 +172,8 @@ function itemAmount(item) {
 
 async function stats(env, fresh) {
   if (!fresh) {
-    const cached = await env.EVENTS.get("stats", "json");
-    if (cached) return Response.json(cached);
+    const cached = await caches.default.match(STATS_CACHE_KEY);
+    if (cached) return cached;
   }
   const token = await airwallexToken(env);
   const subs = [];
@@ -190,21 +198,16 @@ async function stats(env, fresh) {
   // Takings from the payments this relay has seen (kept 30 days), in the same currency.
   const now = Date.now(), dayAgo = now - 864e5;
   let today = 0, todayCount = 0, month = 0, monthCount = 0;
-  let cursor;
-  do {
-    const page = await env.EVENTS.list({ prefix: "evt:", cursor });
-    const vals = await Promise.all(page.keys.map(k => env.EVENTS.get(k.name, "json")));
-    for (const e of vals) {
-      if (e?.kind !== "payment" || String(e.ref).startsWith("test_") || e.currency !== currency) continue;
-      month += Number(e.amount) || 0; monthCount++;
-      if (e.at >= dayAgo) { today += Number(e.amount) || 0; todayCount++; }
-    }
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
+  for (const e of await loadRecent(env)) {
+    if (e?.kind !== "payment" || String(e.ref).startsWith("test_") || e.currency !== currency) continue;
+    month += Number(e.amount) || 0; monthCount++;
+    if (e.at >= dayAgo) { today += Number(e.amount) || 0; todayCount++; }
+  }
 
   const round = n => Math.round(n * 100) / 100;
   const result = { subscribers: subs.length, mrr: round(mrr), currency, byCurrency,
                    today: round(today), todayCount, month: round(month), monthCount, at: now };
-  await env.EVENTS.put("stats", JSON.stringify(result), { expirationTtl: STATS_CACHE_S });
+  // Cached in the edge cache, not KV: free, and keeps KV writes for events.
+  await caches.default.put(STATS_CACHE_KEY, Response.json(result, { headers: { "cache-control": `max-age=${STATS_CACHE_S}` } }));
   return Response.json(result);
 }
