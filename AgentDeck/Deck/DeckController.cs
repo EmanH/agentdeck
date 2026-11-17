@@ -19,6 +19,7 @@ interface IDeckActions
     void AddProject();
     void PressEnter();
     void ToggleDictation();
+    void OpenUrl(string url);
     int? ActiveSessionId(string projectId);
 }
 
@@ -33,6 +34,7 @@ sealed class DeckController : IDisposable
 {
     static readonly int[] ProjectKeys = [0, 5, 10];
     static readonly int[] SlotKeys = [1, 2, 3, 4, 6, 7, 8, 9, 11];
+    const int RevenueKey = 9; // right column, second from bottom; replaces that session slot when the revenue feed is on
     static readonly int[] PickerKeys = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12];
     const int MoreKey = 10, RepasteKey = 11, WorkflowsKey = 12, EnterKey = 13, MicKey = 14, KeyCount = 15;
     const int RepasteMs = 10_000; // "paste again" shows this long after a transcript (or its last press)
@@ -54,6 +56,7 @@ sealed class DeckController : IDisposable
     readonly TranscriptStore _transcripts;
     readonly WorkflowStore _workflows;
     readonly IDeckActions _actions;
+    readonly RevenueFeed _revenue;
     long _repastePressedAt;
     readonly Thread _thread;
     volatile bool _stop;
@@ -78,6 +81,12 @@ sealed class DeckController : IDisposable
     int _pickerPage, _workflowPage;
     long _pickerTouched;
 
+    // Revenue: the green ripple after pressing a payment card, then the payment-detail screen.
+    const int RippleMs = 1300, DetailOpensAfterMs = 420, DetailTimeoutMs = 45_000, CelebrateMs = 2400;
+    long _rippleAt = -1;
+    volatile RevenueEvent? _detail;
+    long _detailAt;
+
     // Editor mode stays until Back; no idle timeout.
     volatile bool _editorOpen;
     readonly long[] _editorPressedAt = new long[KeyCount];
@@ -91,7 +100,7 @@ sealed class DeckController : IDisposable
                                    Action? Repeat = null, Action? Release = null);
 
     public DeckController(ProjectStore projects, SessionManager sessions, DictationService dictation,
-                          TranscriptStore transcripts, WorkflowStore workflows, IDeckActions actions)
+                          TranscriptStore transcripts, WorkflowStore workflows, RevenueFeed revenue, IDeckActions actions)
     {
         _projects = projects;
         _sessions = sessions;
@@ -99,6 +108,7 @@ sealed class DeckController : IDisposable
         _transcripts = transcripts;
         _workflows = workflows;
         _actions = actions;
+        _revenue = revenue;
         _thread = new Thread(Loop) { IsBackground = true, Name = "deck" };
         _thread.Start();
     }
@@ -121,6 +131,7 @@ sealed class DeckController : IDisposable
                     if (!board.IsConnected) throw new IOException("Stream Deck disconnected");
                     FireHolds(frameStart);
                     if (frameStart - _pickerTouched > PickerTimeoutMs) _pickerOpen = _workflowsOpen = false;
+                    if (_detail != null && frameStart - Math.Max(_pickerTouched, _detailAt) > DetailTimeoutMs) _detail = null;
 
                     var views = BuildViews();
                     _views = views;
@@ -267,6 +278,12 @@ sealed class DeckController : IDisposable
         var projects = _projects.Snapshot();
         var selectedId = _projects.SelectedId;
 
+        if (_detail is { } detail && now >= _detailAt)
+        {
+            BuildPaymentDetail(views, detail, now);
+            ApplyRevenueEffects(views, now);
+            return views;
+        }
         if (_editorOpen)
         {
             BuildEditor(views, now);
@@ -284,6 +301,7 @@ sealed class DeckController : IDisposable
                 _workflowsOpen = false;
                 BuildSessions(views, project, now);
                 BuildRepaste(views, now);
+                BuildRevenue(views, now);
                 if (project != null)
                     views[WorkflowsKey] = new KeyView("workflows", KeyArt.WorkflowsButton, OpenWorkflows);
             }
@@ -300,6 +318,7 @@ sealed class DeckController : IDisposable
         float level = _dictation.Level;
         views[MicKey] = new KeyView(state == DictationState.Idle ? "m|idle" : $"m|{state}|{now / 33}",
             c => KeyArt.Mic(c, state, t, level), _actions.ToggleDictation);
+        ApplyRevenueEffects(views, now);
         return views;
     }
 
@@ -343,11 +362,12 @@ sealed class DeckController : IDisposable
         if (project == null) return;
         var color = KeyArt.ParseColor(project.Color);
         int? activeId = _actions.ActiveSessionId(project.Id);
+        var slots = _revenue.Enabled ? SlotKeys.Where(k => k != RevenueKey).ToArray() : SlotKeys;
         int slot = 0;
         foreach (var s in _sessions.ForProject(project.Id)) // tab order
         {
-            if (slot >= SlotKeys.Length) break;
-            int key = SlotKeys[slot++];
+            if (slot >= slots.Length) break;
+            int key = slots[slot++];
             bool active = s.Id == activeId;
             float pulse = s.Busy ? 0.5f + 0.5f * MathF.Sin(now / 160f) : -1;
             int pulseStep = pulse < 0 ? -1 : (int)(pulse * 8);
@@ -362,9 +382,188 @@ sealed class DeckController : IDisposable
         }
         foreach (var agent in LaunchAgents)
         {
-            if (slot >= SlotKeys.Length) break;
-            views[SlotKeys[slot++]] = new KeyView($"l|{agent}", c => KeyArt.Launcher(c, agent), () => _actions.Launch(agent));
+            if (slot >= slots.Length) break;
+            views[slots[slot++]] = new KeyView($"l|{agent}", c => KeyArt.Launcher(c, agent), () => _actions.Launch(agent));
         }
+    }
+
+    /// <summary>Airwallex: MRR and subscribers at rest; a pulsing card per new payment/subscriber, opened (and dismissed) by a press.</summary>
+    void BuildRevenue(KeyView[] views, long now)
+    {
+        if (!_revenue.Enabled) return;
+        var unseen = _revenue.Unseen();
+        if (unseen.Length == 0)
+        {
+            var st = _revenue.Stats;
+            views[RevenueKey] = new KeyView($"rev|{st?.Mrr}|{st?.Currency}|{st?.Subscribers}",
+                c => KeyArt.RevenueStats(c, st?.Mrr, st?.Currency, st?.Subscribers),
+                () => _actions.OpenUrl("https://www.airwallex.com/app/billing/subscriptions"));
+            return;
+        }
+        var e = unseen[0];
+        float pulse = 0.5f + 0.5f * MathF.Sin(now / 220f);
+        views[RevenueKey] = new KeyView($"revev|{e.Key}|{unseen.Length}|{(int)(pulse * 8)}",
+            c => KeyArt.RevenueEvent(c, e.Kind, e.Label, e.Amount, e.Currency, unseen.Length, pulse),
+            () => OpenPayment(_revenue.Pop()));
+    }
+
+    /// <summary>Green ripple out from the revenue key, then the detail screen fades in behind it.</summary>
+    void OpenPayment(RevenueEvent? e)
+    {
+        if (e == null) return;
+        long now = Environment.TickCount64;
+        _rippleAt = now;
+        _detailAt = now + DetailOpensAfterMs;
+        _pickerTouched = now;
+        _detail = e;
+    }
+
+    static (float x, float y) KeyCentre(int key) => (key % 5 * 84 + 36, key / 5 * 84 + 36); // 72 px keys, ~12 px gaps
+
+    /// <summary>Distance from the revenue key, 0..1 across the deck.</summary>
+    static float DistanceFromRevenueKey(int key)
+    {
+        var (x, y) = KeyCentre(key);
+        var (ox, oy) = KeyCentre(RevenueKey);
+        return MathF.Sqrt((x - ox) * (x - ox) + (y - oy) * (y - oy)) / 346f;
+    }
+
+    /// <summary>Layers the press ripple (green) and the arrival celebration (gold) over whatever the keys show.</summary>
+    void ApplyRevenueEffects(KeyView[] views, long now)
+    {
+        if (!_revenue.Enabled) return;
+        float ripple = _rippleAt < 0 ? -1 : (now - _rippleAt) / (float)RippleMs;
+        if (ripple >= 1) { _rippleAt = -1; ripple = -1; }
+        long since = now - _revenue.LastCelebrationTicks;
+        float party = _revenue.LastCelebrationTicks < 0 || since > CelebrateMs ? -1 : since / (float)CelebrateMs;
+        if (ripple < 0 && party < 0) return;
+
+        var green = new SKColor(52, 211, 153);
+        var gold = new SKColor(255, 201, 64);
+        for (int k = 0; k < views.Length; k++)
+        {
+            float d = DistanceFromRevenueKey(k);
+            float wash = 0, ring = 0, gWash = 0, gRing = 0;
+            if (ripple >= 0)
+            {
+                // A ring that sweeps the deck in ~60% of the time, leaving a wash behind that fades out.
+                float front = ripple * 1.7f;
+                float fade = ripple < 0.55f ? 1 : 1 - (ripple - 0.55f) / 0.45f;
+                ring = MathF.Exp(-MathF.Pow((d - front) / 0.16f, 2)) * fade;
+                wash = (d <= front ? 0.55f : 0) * fade + ring * 0.6f;
+            }
+            if (party >= 0)
+            {
+                // Two soft gold pulses rolling out from the revenue key.
+                for (int pulse = 0; pulse < 2; pulse++)
+                {
+                    float p = party * 1.5f - pulse * 0.35f;
+                    if (p is < 0 or > 1) continue;
+                    float r = MathF.Exp(-MathF.Pow((d - p * 1.3f) / 0.15f, 2)) * (1 - p);
+                    gRing = Math.Max(gRing, r);
+                    gWash = Math.Max(gWash, r * 0.35f);
+                }
+            }
+            float burst = party >= 0 && k == RevenueKey ? Math.Min(1, party * 1.6f) : -1;
+            if (wash + ring + gWash + gRing < 0.02f && burst < 0) continue;
+
+            var base_ = views[k];
+            int step = (int)(Math.Max(ripple, party) * 60);
+            views[k] = base_ with
+            {
+                Signature = $"{base_.Signature}|fx{step}",
+                Draw = c =>
+                {
+                    base_.Draw(c);
+                    if (gWash + gRing > 0.01f) KeyArt.Glow(c, gold, gWash, gRing);
+                    if (burst > 0) KeyArt.Burst(c, burst, green);
+                    if (wash + ring > 0.01f) KeyArt.Glow(c, green, wash, ring);
+                },
+            };
+        }
+    }
+
+    /// <summary>
+    /// The payment on the deck: amount, where it's from, how it was paid, who, when, and the business totals.
+    /// Tiles fade in rippling out from the revenue key. Back (top-left) or 45 idle seconds closes it.
+    /// </summary>
+    void BuildPaymentDetail(KeyView[] views, RevenueEvent e, long now)
+    {
+        var st = _revenue.Stats;
+        var green = new SKColor(52, 211, 153);
+        var blue = new SKColor(76, 194, 255);
+        var purple = new SKColor(168, 85, 247);
+        var gold = new SKColor(255, 201, 64);
+        string? cur = e.Currency ?? st?.Currency;
+
+        void Tile(int key, string caption, string? value, string? sub, SKColor accent, bool big = false)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            views[key] = new KeyView($"pd|{key}|{caption}|{value}|{sub}", c => KeyArt.DetailTile(c, caption, value, sub, accent, big));
+        }
+
+        string title = e.Kind switch { "subscriber" => "New subscriber", "intent" => "Checkout", _ => "Payment" };
+        views[0] = new KeyView("pd-back", KeyArt.Back, () => _detail = null);
+        Tile(1, title, e.Amount is { } a ? KeyArt.Money(a, cur) : e.Kind == "subscriber" ? "Welcome!" : "—", cur, green, big: true);
+        Tile(2, "Country", CountryName(e.Country) ?? e.Country, e.Country?.ToUpperInvariant(), blue);
+        Tile(3, "Paid with", e.Method, Join(e.Funding, e.CardCountry != null && e.CardCountry != e.Country ? $"card from {e.CardCountry}" : null), blue);
+        views[4] = new KeyView("pd-open", KeyArt.OpenExternal, () => { _detail = null; _actions.OpenUrl(e.Url); });
+        Tile(5, "Customer", e.Customer ?? e.Email ?? e.Label, e.Customer != null ? e.Email : null, purple);
+        Tile(6, "When", Ago(e.At), DateTimeOffset.FromUnixTimeMilliseconds(e.At).ToLocalTime().ToString("ddd h:mm tt"), purple);
+        Tile(7, "For", e.Description ?? e.OrderId, e.Description != null ? e.OrderId : null, purple);
+        Tile(8, "Risk", e.Risk is { } r ? r.ToString("0.#") : null, "Airwallex score", purple);
+        if (st != null)
+        {
+            Tile(9, "Last 24 h", st.Today is { } t ? KeyArt.Money(t, st.Currency) : null, st.TodayCount is { } n ? $"{n} payment{(n == 1 ? "" : "s")}" : null, gold);
+            Tile(10, "Subscribers", st.Subscribers.ToString(), "active", gold);
+            Tile(11, "MRR", KeyArt.Money(st.Mrr, st.Currency), st.Currency, gold, big: true);
+            Tile(12, "Last 30 days", st.Month is { } m ? KeyArt.Money(m, st.Currency) : null, st.MonthCount is { } mc ? $"{mc} payments" : null, gold);
+        }
+        var more = _revenue.Unseen().Length;
+        if (more > 0)
+            views[14] = new KeyView($"pd-next|{more}", c => KeyArt.DetailTile(c, "Next", $"{more} more", null, green),
+                () => OpenPayment(_revenue.Pop()));
+
+        // Fade the tiles in, rippling out from the revenue key.
+        float elapsed = now - _detailAt;
+        for (int k = 0; k < views.Length; k++)
+        {
+            float appear = Math.Clamp((elapsed - DistanceFromRevenueKey(k) * 260) / 220f, 0, 1);
+            if (appear >= 1) continue;
+            var v = views[k];
+            views[k] = v with
+            {
+                Signature = $"{v.Signature}|in{(int)(appear * 12)}",
+                Draw = c =>
+                {
+                    using var layer = new SKPaint { Color = SKColors.White.WithAlpha((byte)(appear * 255)) };
+                    c.SaveLayer(layer);
+                    c.Translate(36, 36);
+                    c.Scale(0.85f + 0.15f * appear);
+                    c.Translate(-36, -36);
+                    v.Draw(c);
+                    c.Restore();
+                },
+            };
+        }
+    }
+
+    static string? Join(params string?[] parts) =>
+        parts.Where(p => !string.IsNullOrWhiteSpace(p)).ToArray() is { Length: > 0 } list ? string.Join(" · ", list) : null;
+
+    static string? CountryName(string? code)
+    {
+        if (code is not { Length: 2 }) return null;
+        try { return new System.Globalization.RegionInfo(code).EnglishName; } catch { return null; }
+    }
+
+    static string Ago(long unixMs)
+    {
+        var span = DateTimeOffset.UtcNow - DateTimeOffset.FromUnixTimeMilliseconds(unixMs);
+        return span.TotalMinutes < 1 ? "Just now"
+            : span.TotalHours < 1 ? $"{(int)span.TotalMinutes} min ago"
+            : span.TotalDays < 1 ? $"{(int)span.TotalHours} h ago"
+            : $"{(int)span.TotalDays} d ago";
     }
 
     /// <summary>For a few seconds after a transcript, key 13 (left of Enter) pastes it again.</summary>

@@ -380,6 +380,105 @@ static class KeyArt
         DrawFittedText(canvas, "Paste again", new SKRect(8, 45, 64, 60), 11, 9, 1, new SKColor(200, 200, 200), Semibold);
     }
 
+    static readonly SKColor MoneyGreen = new(52, 211, 153);
+
+    public static string Money(decimal amount, string? currency)
+    {
+        string sym = currency?.ToUpperInvariant() switch { "USD" or "AUD" or "CAD" or "NZD" or "HKD" or "SGD" => "$", "EUR" => "€", "GBP" => "£", _ => "" };
+        string n = amount >= 10_000 ? $"{amount / 1000:0.#}k" : amount >= 1000 ? $"{amount:#,0}" : $"{amount:0.##}";
+        return sym.Length > 0 ? sym + n : $"{n} {currency}";
+    }
+
+    /// <summary>Revenue key at rest: MRR big, active subscribers beneath.</summary>
+    public static void RevenueStats(SKCanvas canvas, decimal? mrr, string? currency, int? subscribers)
+    {
+        using var bg = Fill(new SKColor(16, 32, 26));
+        canvas.DrawRoundRect(new SKRect(2, 2, 70, 70), 10, 10, bg);
+        DrawFittedText(canvas, "MRR", new SKRect(6, 6, 66, 18), 10, 9, 1, new SKColor(130, 170, 150), Semibold);
+        DrawFittedText(canvas, mrr is { } m ? Money(m, currency) : "…", new SKRect(5, 19, 67, 44), 20, 11, 1, MoneyGreen);
+        DrawFittedText(canvas, subscribers is { } n ? $"{n} subs" : "", new SKRect(6, 48, 66, 64), 12, 9, 1, new SKColor(210, 210, 210), Semibold);
+    }
+
+    /// <summary>Unseen payment/subscriber: gold, pulsing; a count badge when several are queued.</summary>
+    public static void RevenueEvent(SKCanvas canvas, string kind, string label, decimal? amount, string? currency, int count, float pulse)
+    {
+        var accent = kind switch { "subscriber" => new SKColor(168, 85, 247), "intent" => new SKColor(76, 194, 255), _ => MoneyGreen };
+        using var bg = Fill(accent.WithAlpha((byte)(40 + 50 * pulse)));
+        canvas.DrawRoundRect(new SKRect(2, 2, 70, 70), 10, 10, bg);
+        using var rim = Stroke(accent, 2.5f);
+        canvas.DrawRoundRect(new SKRect(3, 3, 69, 69), 10, 10, rim);
+        DrawFittedText(canvas, kind switch { "subscriber" => "New sub", "intent" => "Checkout", _ => "Payment" }, new SKRect(6, 6, 52, 19), 11, 9, 1, SKColors.White, Semibold);
+        DrawFittedText(canvas, amount is { } a ? Money(a, currency) : "", new SKRect(5, 20, 67, 42), 19, 11, 1, SKColors.White);
+        DrawFittedText(canvas, label, new SKRect(5, 44, 67, 66), 10, 8, 2, new SKColor(225, 225, 225), Semibold);
+        if (count > 1)
+        {
+            using var badge = Fill(StarColor);
+            canvas.DrawCircle(60, 13, 9, badge);
+            DrawFittedText(canvas, count > 9 ? "9+" : count.ToString(), new SKRect(52, 6, 68, 20), 11, 8, 1, SKColors.Black);
+        }
+    }
+
+    // --- revenue effects & payment detail ----------------------------------------------
+
+    /// <summary>A coloured wash and/or glowing rim over a key (ripple, celebration). Both 0..1.</summary>
+    public static void Glow(SKCanvas canvas, SKColor color, float wash, float ring)
+    {
+        if (wash > 0.01f)
+        {
+            using var fill = Fill(color.WithAlpha((byte)(Math.Clamp(wash, 0, 1) * 150)));
+            fill.BlendMode = SKBlendMode.Screen;
+            canvas.DrawRoundRect(new SKRect(0, 0, 72, 72), 10, 10, fill);
+        }
+        if (ring > 0.01f)
+        {
+            using var rim = Stroke(color.WithAlpha((byte)(Math.Clamp(ring, 0, 1) * 255)), 3);
+            rim.MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Solid, 3);
+            canvas.DrawRoundRect(new SKRect(3, 3, 69, 69), 10, 10, rim);
+        }
+    }
+
+    /// <summary>Sparkles bursting out of the centre and fading; t runs 0..1.</summary>
+    public static void Burst(SKCanvas canvas, float t, SKColor color)
+    {
+        if (t is <= 0 or >= 1) return;
+        float ease = 1 - (1 - t) * (1 - t);
+        byte alpha = (byte)(255 * (1 - t));
+        for (int i = 0; i < 10; i++)
+        {
+            float angle = i * MathF.Tau / 10 + (i % 2) * 0.3f;
+            float r = 6 + ease * (i % 2 == 0 ? 34 : 24);
+            using var dot = Fill((i % 3 == 0 ? StarColor : color).WithAlpha(alpha));
+            canvas.DrawCircle(36 + MathF.Cos(angle) * r, 36 + MathF.Sin(angle) * r, 2.6f * (1 - t * 0.6f), dot);
+        }
+        Star(canvas, 36, 42 - ease * 4, 22 + 10 * MathF.Sin(t * MathF.PI));
+    }
+
+    /// <summary>One fact on the payment-detail screen: small caption, value, optional sub-line.</summary>
+    public static void DetailTile(SKCanvas canvas, string caption, string value, string? sub, SKColor accent, bool big = false)
+    {
+        using var bg = Fill(new SKColor(18, 22, 20));
+        canvas.DrawRoundRect(new SKRect(2, 2, 70, 70), 10, 10, bg);
+        using var bar = Fill(accent);
+        canvas.DrawRoundRect(new SKRect(8, 6, 22, 8.5f), 1.2f, 1.2f, bar);
+        DrawFittedText(canvas, caption.ToUpperInvariant(), new SKRect(6, 10, 66, 21), 9, 7.5f, 1, new SKColor(140, 150, 145), Semibold);
+        var valueRect = sub == null ? new SKRect(5, 22, 67, 66) : new SKRect(5, 22, 67, 50);
+        DrawFittedText(canvas, value, valueRect, big ? 22 : 15, 8, sub == null ? 3 : 2, big ? MoneyGreen : SKColors.White);
+        if (sub != null) DrawFittedText(canvas, sub, new SKRect(5, 51, 67, 67), 10, 7.5f, 1, new SKColor(170, 180, 175), Semibold);
+    }
+
+    /// <summary>The "Open in Airwallex" key on the detail screen.</summary>
+    public static void OpenExternal(SKCanvas canvas)
+    {
+        using var bg = Fill(new SKColor(16, 32, 26));
+        canvas.DrawRoundRect(new SKRect(2, 2, 70, 70), 10, 10, bg);
+        using var pen = Stroke(MoneyGreen, 2.5f);
+        canvas.DrawRoundRect(new SKRect(22, 14, 46, 38), 4, 4, pen);
+        canvas.DrawLine(34, 26, 50, 10, pen);
+        canvas.DrawLine(41, 10, 50, 10, pen);
+        canvas.DrawLine(50, 10, 50, 19, pen);
+        DrawFittedText(canvas, "Open in Airwallex", new SKRect(6, 44, 66, 66), 11, 8, 2, new SKColor(210, 210, 210), Semibold);
+    }
+
     static readonly SKColor WorkflowAccent = new(168, 85, 247);
 
     /// <summary>The permanent Workflows key: a little three-step pipeline.</summary>

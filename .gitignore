@@ -13,3 +13,7 @@ prototypes/python/hidapi.dll
 
 # Node (icon build)
 node_modules/
+
+# Cloudflare relay
+.dev.vars
+.wrangler/

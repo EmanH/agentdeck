@@ -35,6 +35,7 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
     readonly SessionAnalyzer _analyzer;
     readonly DictationService _dictation;
     readonly DeckController _deck;
+    readonly RevenueFeed _revenue = new();
     readonly TrayIcon _tray;
     readonly ModifierHotkey _hotkey;
     readonly ControlServer _control;
@@ -80,7 +81,7 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
         _workflows.Changed += () => Dispatcher.BeginInvoke(PushWorkflows);
         AgentCatalog.Changed += () => Dispatcher.BeginInvoke(PushAgentOptions);
         AgentCatalog.Refresh();
-        _deck = new DeckController(_projects, _sessions, _dictation, _transcripts, _workflows, this);
+        _deck = new DeckController(_projects, _sessions, _dictation, _transcripts, _workflows, _revenue, this);
         _hotkey = new ModifierHotkey(() => Dispatcher.BeginInvoke(_dictation.Toggle));
         _tray = new TrayIcon(ShowFromTray, Quit);
 
@@ -160,6 +161,7 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
         _control.Dispose();
         _hotkey.Dispose();
         _deck.Dispose();
+        _revenue.Dispose();
         _sessions.CloseAll();
         PastedImages.DeleteAll();
         _tray.Dispose();
@@ -434,6 +436,8 @@ sealed class MainWindow : Window, IDeckActions, IControlActions
             Log.Error($"web message {json[..Math.Min(json.Length, 200)]}", ex);
         }
     }
+
+    void IDeckActions.OpenUrl(string url) => OpenInBrowser(url);
 
     /// <summary>Open a web link in the user's default browser (http/https only: never files or other schemes).</summary>
     static void OpenInBrowser(string? uri)

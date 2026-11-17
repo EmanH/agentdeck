@@ -1,0 +1,19 @@
+name = "agentdeck-airwallex-relay"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# Event queue + stats cache. Create with: npx wrangler kv namespace create EVENTS, then paste the id here.
+[[kv_namespaces]]
+binding = "EVENTS"
+id = "d2ee9ebe416d4297a54660b8e420eb35"
+
+[vars]
+AIRWALLEX_API = "https://api.airwallex.com"
+# Where a deck press goes; {id} is replaced. Adjust if the Airwallex web app uses different paths.
+PAYMENT_URL = "https://www.airwallex.com/app/acquiring/payments/{id}"
+SUBSCRIPTION_URL = "https://www.airwallex.com/app/billing/subscriptions/{id}"
+
+# Secrets (npx wrangler secret put NAME):
+#   WEBHOOK_SECRET      - from the Airwallex webhook settings
+#   RELAY_TOKEN         - any long random string; the PC sends it as a Bearer token
+#   AIRWALLEX_CLIENT_ID, AIRWALLEX_API_KEY - API key used by /stats
